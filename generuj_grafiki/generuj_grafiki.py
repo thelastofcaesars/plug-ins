@@ -12,6 +12,9 @@ from gi.repository import GimpUi
 gi.require_version("GObject", "2.0")
 from gi.repository import GObject
 
+gi.require_version("GLib", "2.0")
+from gi.repository import GLib
+
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 
@@ -77,31 +80,29 @@ class GenerujGrafiki(Gimp.PlugIn):
 
         return procedure
 
-    def run(self, procedure, run_mode, image, n_drawables, drawables, args, run_data):
+    def run(self, procedure, run_mode, image, drawables, config, run_data):
 
         # 1. Jawna inicjalizacja interfejsu graficznego (GimpUi)
         GimpUi.init("python-fu-generuj-grafiki")
 
         # 2. Tworzenie automatycznego okna z zarejestrowanych argumentów
-        dialog = GimpUi.ProcedureDialog.new(
-            procedure, GimpUi.ProcedureDialogMode.RUN, None
-        )
+        # Drugi argument to config (obiekt ProcedureConfig), nie tryb
+        dialog = GimpUi.ProcedureDialog.new(procedure, config, None)
         dialog.fill(None)  # Wypełnij okno wszystkimi zdefiniowanymi polami
 
         # 3. Wyświetlenie okna i czekanie na reakcję użytkownika
-        # Jeśli użytkownik kliknie "Anuluj" lub zamknie okno krzyżykiem:
         if not dialog.run():
             dialog.destroy()
-            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
         # Zamknięcie okna po kliknięciu OK
         dialog.destroy()
 
         # --- ODBIÓR DANYCH Z FORMULARZA ---
-        ilosc = args.index(0)
-        tekst = args.index(1)
-        gfile_png = args.index(2)  # Obiekt Gio.File lub None
-        gfile_zapis = args.index(3)  # Obiekt Gio.File lub None
+        ilosc = config.get_property("ilosc")
+        tekst = config.get_property("tekst")
+        gfile_png = config.get_property("sciezka_png")  # Gio.File lub None
+        gfile_zapis = config.get_property("katalog_zapis")  # Gio.File lub None
 
         sciezka_png = gfile_png.get_path() if gfile_png else ""
         katalog_zapis = gfile_zapis.get_path() if gfile_zapis else ""
@@ -122,7 +123,7 @@ class GenerujGrafiki(Gimp.PlugIn):
         Gimp.Display.new(nowy_obraz)
         Gimp.displays_flush()
 
-        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
 if __name__ == "__main__":
