@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import sys
+import os
+import traceback
 import gi
 
 gi.require_version("Gimp", "3.0")
@@ -82,46 +84,96 @@ class GenerujGrafiki(Gimp.PlugIn):
 
     def run(self, procedure, run_mode, image, drawables, config, run_data):
 
-        # 1. Jawna inicjalizacja interfejsu graficznego (GimpUi)
         GimpUi.init("python-fu-generuj-grafiki")
 
-        # 2. Tworzenie automatycznego okna z zarejestrowanych argumentów
-        # Drugi argument to config (obiekt ProcedureConfig), nie tryb
         dialog = GimpUi.ProcedureDialog.new(procedure, config, None)
-        dialog.fill(None)  # Wypełnij okno wszystkimi zdefiniowanymi polami
+        dialog.fill(None)
 
-        # 3. Wyświetlenie okna i czekanie na reakcję użytkownika
         if not dialog.run():
             dialog.destroy()
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
-        # Zamknięcie okna po kliknięciu OK
         dialog.destroy()
 
-        # --- ODBIÓR DANYCH Z FORMULARZA ---
-        ilosc = config.get_property("ilosc")
-        tekst = config.get_property("tekst")
-        gfile_png = config.get_property("sciezka_png")  # Gio.File lub None
-        gfile_zapis = config.get_property("katalog_zapis")  # Gio.File lub None
+        try:
+            # --- ODBIÓR DANYCH Z FORMULARZA ---
+            ilosc = config.get_property("ilosc")
+            tekst = config.get_property("tekst")
+            gfile_png = config.get_property("sciezka_png")
+            gfile_zapis = config.get_property("katalog_zapis")
 
-        sciezka_png = gfile_png.get_path() if gfile_png else ""
-        katalog_zapis = gfile_zapis.get_path() if gfile_zapis else ""
+            katalog_zapis = gfile_zapis.get_path() if gfile_zapis else None
 
-        # --- LOGIKA TWORZENIA GRAFIK ---
-        szerokosc, wysokosc = 800, 600
-        nowy_obraz = Gimp.Image.new(szerokosc, wysokosc, Gimp.ImageBaseType.RGB)
+            if not katalog_zapis:
+                Gimp.message("Wybierz folder do zapisu!")
+                return procedure.new_return_values(
+                    Gimp.PDBStatusType.CALLING_ERROR, GLib.Error()
+                )
 
-        for i in range(1, ilosc + 1):
-            tresc = f"{tekst} #{i}"
-            text_layer = Gimp.TextLayer.new(
-                nowy_obraz, tresc, "Sans-serif", 35, Gimp.Unit.PIXEL
+            szerokosc, wysokosc = 800, 600
+
+            for i in range(1, ilosc + 1):
+                # Utwórz nowy obraz dla każdego pliku
+                nowy_obraz = Gimp.Image.new(szerokosc, wysokosc, Gimp.ImageBaseType.RGB)
+
+                # Białe tło
+                tlo = Gimp.Layer.new(
+                    nowy_obraz,
+                    "Tło",
+                    szerokosc,
+                    wysokosc,
+                    Gimp.ImageType.RGB_IMAGE,
+                    100,
+                    Gimp.LayerMode.NORMAL,
+                )
+                nowy_obraz.insert_layer(tlo, None, -1)
+                tlo.fill(Gimp.FillType.WHITE)
+
+                # Opcjonalnie: nakładanie obrazu PNG
+                if gfile_png:
+                    sciezka_png = gfile_png.get_path()
+                    if sciezka_png and os.path.isfile(sciezka_png):
+                        png_img = Gimp.file_load(
+                            Gimp.RunMode.NONINTERACTIVE,
+                            Gio.File.new_for_path(sciezka_png),
+                        )
+                        # GIMP 3: get_active_layer() zamiast get_active_drawable()
+                        png_layer = png_img.get_active_layer()
+                        # GIMP 3: Gimp.Layer.new_from_drawable() zamiast Gimp.layer_new_from_drawable()
+                        skopiowana = Gimp.Layer.new_from_drawable(png_layer, nowy_obraz)
+                        nowy_obraz.insert_layer(skopiowana, None, -1)
+                        png_img.delete()
+
+                # Tekst na grafice
+                # GIMP 3: text_fontname bez parametru Unit (usunięty)
+                tresc = f"{tekst} #{i}"
+                Gimp.text_fontname(nowy_obraz, None, 80, 50, tresc, 0, True, 35, "Sans")
+
+                # Spłaszcz obraz
+                nowy_obraz.flatten()
+
+                # GIMP 3: get_active_layer() zamiast get_active_drawable()
+                wynikowa_warstwa = nowy_obraz.get_active_layer()
+                plik_wyjsciowy = os.path.join(katalog_zapis, f"grafika_{i:03d}.png")
+
+                # GIMP 3: Gimp.file_overwrite() do eksportu
+                Gimp.file_overwrite(
+                    Gimp.RunMode.NONINTERACTIVE,
+                    nowy_obraz,
+                    wynikowa_warstwa,
+                    Gio.File.new_for_path(plik_wyjsciowy),
+                )
+
+                nowy_obraz.delete()
+
+            Gimp.message(f"Gotowe! Zapisano {ilosc} grafik do:\n{katalog_zapis}")
+
+        except Exception as e:
+            blad = traceback.format_exc()
+            Gimp.message(f"BŁĄD:\n{e}\n\n{blad}")
+            return procedure.new_return_values(
+                Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error()
             )
-            nowy_obraz.insert_layer(text_layer, None, 0)
-            text_layer.set_offsets(80, 50 + (i * 45))
-
-        # Wyświetlamy efekty na ekranie
-        Gimp.Display.new(nowy_obraz)
-        Gimp.displays_flush()
 
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
