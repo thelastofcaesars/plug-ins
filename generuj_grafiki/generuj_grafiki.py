@@ -137,23 +137,26 @@ class GenerujGrafiki(Gimp.PlugIn):
                             Gimp.RunMode.NONINTERACTIVE,
                             Gio.File.new_for_path(sciezka_png),
                         )
-                        # GIMP 3: get_active_layer() zamiast get_active_drawable()
-                        png_layer = png_img.get_active_layer()
+                        # GIMP 3.2: get_layers()[0] zamiast get_active_layer/drawable
+                        png_layer = png_img.get_layers()[0]
                         # GIMP 3: Gimp.Layer.new_from_drawable() zamiast Gimp.layer_new_from_drawable()
                         skopiowana = Gimp.Layer.new_from_drawable(png_layer, nowy_obraz)
                         nowy_obraz.insert_layer(skopiowana, None, -1)
                         png_img.delete()
 
                 # Tekst na grafice
-                # GIMP 3: text_fontname bez parametru Unit (usunięty)
+                # GIMP 3.2: Gimp.text_font() z obiektem Gimp.Font zamiast text_fontname ze stringiem
                 tresc = f"{tekst} #{i}"
-                Gimp.text_fontname(nowy_obraz, None, 80, 50, tresc, 0, True, 35, "Sans")
+                # Gimp.Font.get_by_name() może zwrócić None jeśli czcionka nie istnieje
+                # Gimp.context_get_font() zawsze zwraca aktualną czcionkę z GIMP
+                font = Gimp.context_get_font()
+                Gimp.text_font(nowy_obraz, tlo, 80, 50, tresc, 0, True, 35, font)
 
                 # Spłaszcz obraz
                 nowy_obraz.flatten()
 
-                # GIMP 3: get_active_layer() zamiast get_active_drawable()
-                wynikowa_warstwa = nowy_obraz.get_active_layer()
+                # GIMP 3.2: get_layers()[0] po flatten (zostaje jedna warstwa)
+                wynikowa_warstwa = nowy_obraz.get_layers()[0]
                 plik_wyjsciowy = os.path.join(katalog_zapis, f"grafika_{i:03d}.png")
 
                 # GIMP 3: Gimp.file_overwrite() do eksportu
