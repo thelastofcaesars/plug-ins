@@ -150,7 +150,8 @@ class GenerujGrafiki(Gimp.PlugIn):
                 # Gimp.Font.get_by_name() może zwrócić None jeśli czcionka nie istnieje
                 # Gimp.context_get_font() zawsze zwraca aktualną czcionkę z GIMP
                 font = Gimp.context_get_font()
-                Gimp.text_font(nowy_obraz, tlo, 80, 50, tresc, 0, True, 35, font)
+                # None jako drawable = GIMP tworzy nową warstwę tekstową zamiast floating selection
+                Gimp.text_font(nowy_obraz, None, 80, 50, tresc, 0, True, 35, font)
 
                 # --- ZAPIS XCF (z osobnymi warstwami, przed flatten) ---
                 plik_xcf = os.path.join(katalog_zapis, f"grafika_{i:03d}.xcf")
