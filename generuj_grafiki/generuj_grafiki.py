@@ -155,17 +155,37 @@ class GenerujGrafiki(Gimp.PlugIn):
                 # Spłaszcz obraz
                 nowy_obraz.flatten()
 
-                # GIMP 3.2: get_layers()[0] po flatten (zostaje jedna warstwa)
-                wynikowa_warstwa = nowy_obraz.get_layers()[0]
                 plik_wyjsciowy = os.path.join(katalog_zapis, f"grafika_{i:03d}.png")
 
-                # GIMP 3: Gimp.file_overwrite() do eksportu
-                Gimp.file_overwrite(
-                    Gimp.RunMode.NONINTERACTIVE,
-                    nowy_obraz,
-                    wynikowa_warstwa,
-                    Gio.File.new_for_path(plik_wyjsciowy),
-                )
+                # GIMP 3.2: eksport przez lookup_procedure + create_config + run
+                # Szukamy właściwej nazwy procedury PNG
+                mozliwe_nazwy = [
+                    "file-png-save",
+                    "file-png-save2",
+                    "gimp-file-overwrite",
+                    "file-png-export",
+                ]
+                file_proc = None
+                uzyta_nazwa = None
+                for nazwa in mozliwe_nazwy:
+                    p = Gimp.get_pdb().lookup_procedure(nazwa)
+                    if p is not None:
+                        file_proc = p
+                        uzyta_nazwa = nazwa
+                        break
+
+                if file_proc is None:
+                    raise RuntimeError(
+                        "Nie znaleziono żadnej procedury PNG do zapisu. "
+                        f"Sprawdzane nazwy: {mozliwe_nazwy}"
+                    )
+
+                file_cfg = file_proc.create_config()
+                file_cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+                file_cfg.set_property("image", nowy_obraz)
+                file_cfg.set_property("file", Gio.File.new_for_path(plik_wyjsciowy))
+                file_cfg.set_property("options", None)
+                file_proc.run(file_cfg)
 
                 nowy_obraz.delete()
 
