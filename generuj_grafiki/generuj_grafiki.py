@@ -152,7 +152,19 @@ class GenerujGrafiki(Gimp.PlugIn):
                 font = Gimp.context_get_font()
                 Gimp.text_font(nowy_obraz, tlo, 80, 50, tresc, 0, True, 35, font)
 
-                # Spłaszcz obraz
+                # --- ZAPIS XCF (z osobnymi warstwami, przed flatten) ---
+                plik_xcf = os.path.join(katalog_zapis, f"grafika_{i:03d}.xcf")
+                xcf_proc = Gimp.get_pdb().lookup_procedure("gimp-xcf-save")
+                if xcf_proc is None:
+                    xcf_proc = Gimp.get_pdb().lookup_procedure("file-xcf-save")
+                if xcf_proc is not None:
+                    xcf_cfg = xcf_proc.create_config()
+                    xcf_cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+                    xcf_cfg.set_property("image", nowy_obraz)
+                    xcf_cfg.set_property("file", Gio.File.new_for_path(plik_xcf))
+                    xcf_proc.run(xcf_cfg)
+
+                # Spłaszcz obraz (dopiero teraz, po zapisie XCF)
                 nowy_obraz.flatten()
 
                 plik_wyjsciowy = os.path.join(katalog_zapis, f"grafika_{i:03d}.png")
