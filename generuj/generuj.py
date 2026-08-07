@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import gi
-gi.require_version('Gimp', '3.0')
+
+gi.require_version("Gimp", "3.0")
 from gi.repository import Gimp
-gi.require_version('GimpUi', '3.0')
+
+gi.require_version("GimpUi", "3.0")
 from gi.repository import GimpUi
-gi.require_version('Gegl', '0.4')
+
+gi.require_version("Gegl", "0.4")
 from gi.repository import Gegl
 from gi.repository import GObject
 from gi.repository import GLib
@@ -14,54 +17,65 @@ from gi.repository import Gio
 import os
 import sys
 
-def N_(message): return message
-def _(message): return GLib.dgettext(None, message)
 
-class GoatTest (Gimp.PlugIn):
+def N_(message):
+    return message
+
+
+def _(message):
+    return GLib.dgettext(None, message)
+
+
+class GoatTest(Gimp.PlugIn):
     ## GimpPlugIn virtual methods ##
     def do_query_procedures(self):
-        return [ "python-fu-generuj" ]
+        return ["python-fu-generuj"]
 
     def do_create_procedure(self, name):
-        procedure = Gimp.ImageProcedure.new(self, name,
-                                            Gimp.PDBProcType.PLUGIN,
-                                            self.run, None)
+        procedure = Gimp.ImageProcedure.new(
+            self, name, Gimp.PDBProcType.PLUGIN, self.run, None
+        )
 
         procedure.set_image_types("*")
-        procedure.set_sensitivity_mask (Gimp.ProcedureSensitivityMask.DRAWABLE)
+        procedure.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
 
         procedure.set_menu_label(_("Example generuj in _Python 3"))
         procedure.set_icon_name(GimpUi.ICON_GEGL)
 
         procedure.add_menu_path("<Image>/Filters/Development/")
 
-        procedure.set_documentation(_("example in Python 3"),
-                                    _("example in Python 3"),
-                                    name)
-        procedure.set_attribution("C", "C", "2019")xxxx
+        procedure.set_documentation(
+            _("example in Python 3"), _("example in Python 3"), name
+        )
+        procedure.set_attribution("C", "C", "2019")
 
         return procedure
 
     def run(self, procedure, run_mode, image, drawables, config, run_data):
         GimpUi.init("python-fu-generuj")
         if len(drawables) != 1:
-            msg = _("Procedure '{}' only works with one drawable.").format(procedure.get_name())
+            msg = _("Procedure '{}' only works with one drawable.").format(
+                procedure.get_name()
+            )
             error = GLib.Error.new_literal(Gimp.PlugIn.error_quark(), msg, 0)
             return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR, error)
         else:
             drawable = drawables[0]
 
         if run_mode == Gimp.RunMode.INTERACTIVE:
-            gi.require_version('Gtk', '3.0')
+            gi.require_version("Gtk", "3.0")
             from gi.repository import Gtk
-            gi.require_version('Gdk', '3.0')
+
+            gi.require_version("Gdk", "3.0")
             from gi.repository import Gdk
 
             GimpUi.init("goat-exercise-py3.py")
 
-            dialog = GimpUi.Dialog(use_header_bar=True,
-                                   title=_("Plug-In Example in Python 3"),
-                                   role="goat-exercise-Python3")
+            dialog = GimpUi.Dialog(
+                use_header_bar=True,
+                title=_("Plug-In Example in Python 3"),
+                role="goat-exercise-Python3",
+            )
 
             dialog.add_button(_("_Cancel"), Gtk.ResponseType.CANCEL)
             dialog.add_button(_("_Source"), Gtk.ResponseType.APPLY)
@@ -79,10 +93,12 @@ class GoatTest (Gimp.PlugIn):
             # XXX We use printf-style string for sharing the localized
             # string. You may just use recommended Python format() or
             # any style you like in your plug-ins.
-            head_text=_("This plug-in is an exercise in '%s' to "
-                        "demo plug-in creation.\nCheck out the last "
-                        "version of the source code online by clicking "
-                        "the \"Source\" button.") % ("Python 3")
+            head_text = _(
+                "This plug-in is an exercise in '%s' to "
+                "demo plug-in creation.\nCheck out the last "
+                "version of the source code online by clicking "
+                'the "Source" button.'
+            ) % ("Python 3")
             label = Gtk.Label(label=head_text)
             box.pack_start(label, False, False, 1)
             label.show()
@@ -93,12 +109,12 @@ class GoatTest (Gimp.PlugIn):
             # when converting to string, get newlines as text contents.
             # Rather than wasting time to figure this out, use Python
             # core API!
-            with open(os.path.realpath(__file__), 'r') as f:
+            with open(os.path.realpath(__file__), "r") as f:
                 contents = f.read()
 
             if contents is not None:
                 scrolled = Gtk.ScrolledWindow()
-                scrolled.set_vexpand (True)
+                scrolled.set_vexpand(True)
                 box.pack_start(scrolled, True, True, 1)
                 scrolled.show()
 
@@ -110,7 +126,7 @@ class GoatTest (Gimp.PlugIn):
                 scrolled.add(view)
                 view.show()
 
-            while (True):
+            while True:
                 response = dialog.run()
                 if response == Gtk.ResponseType.OK:
                     dialog.destroy()
@@ -121,8 +137,9 @@ class GoatTest (Gimp.PlugIn):
                     continue
                 else:
                     dialog.destroy()
-                    return procedure.new_return_values(Gimp.PDBStatusType.CANCEL,
-                                                       GLib.Error())
+                    return procedure.new_return_values(
+                        Gimp.PDBStatusType.CANCEL, GLib.Error()
+                    )
 
         intersect, x, y, width, height = drawable.mask_intersect()
         if intersect:
@@ -152,5 +169,6 @@ class GoatTest (Gimp.PlugIn):
             Gimp.displays_flush()
 
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
 
 Gimp.main(GoatTest.__gtype__, sys.argv)
