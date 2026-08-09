@@ -26,12 +26,7 @@ gi.require_version("GLib", "2.0")
 gi.require_version("Gio", "2.0")
 gi.require_version("Gegl", "0.4")
 
-from gi.repository import Gimp  # noqa: E402
-from gi.repository import GimpUi  # noqa: E402
-from gi.repository import GObject  # noqa: E402
-from gi.repository import GLib  # noqa: E402
-from gi.repository import Gio  # noqa: E402
-from gi.repository import Gegl  # noqa: E402
+from gi.repository import Gimp, GimpUi, GObject, GLib, Gio, Gegl  # noqa: E402
 
 # Katalog wspolne/ = katalog tego pliku
 _DIR = os.path.dirname(os.path.abspath(__file__))
