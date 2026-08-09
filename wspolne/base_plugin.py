@@ -130,6 +130,13 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
             False,
             rw,
         )
+        procedure.add_boolean_argument(
+            "zapisz_do_bazy",
+            "Zapisz ustawienia do bazy (nie generuj):",
+            "Dopisuje bieżące ustawienia formularza jako nowy wiersz do CSV zamiast generować grafikę",
+            False,
+            rw,
+        )
 
         # Opcjonalne wymiary (mm) — pozwalają nadpisać wymiar obrazu z dialogu
         procedure.add_int_argument(
@@ -184,6 +191,28 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
                 )
                 db.generuj_przykladowy_csv(sciezka_csv, self.schema())
                 Gimp.message(f"Zapisano przykładowy CSV:\n{sciezka_csv}")
+                return procedure.new_return_values(
+                    Gimp.PDBStatusType.SUCCESS, GLib.Error()
+                )
+
+            # Tryb: zapisz ustawienia do bazy (bez generowania)
+            if config.get_property("zapisz_do_bazy"):
+                dane = self.dane_z_config(config)
+                # Plik docelowy: plik_baza jeśli wybrany, else baza_PROCEDURE_NAME.csv w katalogu
+                gfile_baza = config.get_property("plik_baza")
+                if gfile_baza:
+                    sciezka_bazy = gfile_baza.get_path()
+                else:
+                    sciezka_bazy = os.path.join(
+                        katalog, f"baza_{self.PROCEDURE_NAME}.csv"
+                    )
+                nowy = db.dopisz_wiersz(sciezka_bazy, self.schema(), dane)
+                if nowy:
+                    Gimp.message(
+                        f"Stworzono nową bazę i zapisano wiersz:\n{sciezka_bazy}"
+                    )
+                else:
+                    Gimp.message(f"Dopisano wiersz do bazy:\n{sciezka_bazy}")
                 return procedure.new_return_values(
                     Gimp.PDBStatusType.SUCCESS, GLib.Error()
                 )

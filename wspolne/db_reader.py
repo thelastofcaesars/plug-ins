@@ -334,6 +334,37 @@ def generuj_przykladowy_csv(sciezka: str, schema: BazaSchema) -> None:
         writer.writerows(dane)
 
 
+def dopisz_wiersz(sciezka: str, schema: BazaSchema, dane: dict) -> bool:
+    """
+    Dopisuje jeden wiersz do istniejącego lub nowego pliku CSV.
+
+    - Jeśli plik nie istnieje  → tworzy go z nagłówkiem.
+    - Jeśli plik istnieje      → sprawdza nagłówek i dopisuje na koniec.
+    - Kolumny spoza schematu   → ignorowane (bezpieczne).
+    - Zwraca True gdy nowy plik został stworzony, False gdy dopisano do istniejącego.
+    """
+    kolumny = schema.wszystkie_nazwy()
+
+    # Przygotuj wiersz – tylko kolumny ze schematu, braki uzupełnij domyślnymi
+    domyslne = schema.domyslne()
+    wiersz_do_zapisu = {
+        k: str(dane.get(k) if dane.get(k) is not None else domyslne.get(k, ""))
+        for k in kolumny
+    }
+
+    nowy_plik = not os.path.isfile(sciezka)
+
+    with open(sciezka, "a", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=kolumny, delimiter=";", extrasaction="ignore"
+        )
+        if nowy_plik:
+            writer.writeheader()
+        writer.writerow(wiersz_do_zapisu)
+
+    return nowy_plik
+
+
 def generuj_przykladowy_excel(sciezka: str, schema: BazaSchema) -> None:
     """Zapisuje przykładowy .xlsx dla danego schematu. Wymaga openpyxl."""
     try:
