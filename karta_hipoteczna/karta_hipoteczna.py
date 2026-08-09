@@ -405,51 +405,74 @@ class KartaHipoteczna(Gimp.PlugIn):
     # Kroki budowania karty                                                #
     # ------------------------------------------------------------------ #
 
-    def _krok_tlo(self, obraz, config):
+    def _sciezka_grafiki(self, dane: dict, klucz: str, config) -> str:
+        """
+        Zwraca ścieżkę do grafiki.
+        Najpierw sprawdza dane (z bazy), potem config (z formularza).
+        """
+        sciezka = dane.get(klucz, "").strip()
+        if sciezka and os.path.isfile(sciezka):
+            return sciezka
+        # fallback – z formularza GIMP
+        if config:
+            gfile = config.get_property(klucz)
+            if gfile:
+                p = gfile.get_path()
+                if p and os.path.isfile(p):
+                    return p
+        return ""
+
+    def _krok_tlo(self, obraz, dane: dict, config=None):
         """Krok 1: Warstwa tła – tekstura lub czarne wypełnienie jako fallback."""
-        img_tmp = self._wczytaj_plik(config.get_property("plik_tlo"))
-        if img_tmp:
+        sciezka = self._sciezka_grafiki(dane, "plik_tlo", config)
+        if sciezka:
+            img_tmp = Gimp.file_load(
+                Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(sciezka)
+            )
             self._wstaw_jako_warstwe(
                 obraz, img_tmp, "Tło – tekstura", 0, 0, SZEROKOSC, WYSOKOSC
             )
         else:
             self._nowa_warstwa_kolor(
-                obraz,
-                "Tło – kolor",
-                0,
-                0,
-                SZEROKOSC,
-                WYSOKOSC,
-                Gegl.Color.new("black"),
+                obraz, "Tło – kolor", 0, 0, SZEROKOSC, WYSOKOSC, Gegl.Color.new("black")
             )
 
-    def _krok_wypelnienie_ramki(self, obraz, config):
-        """Krok 2: Kolorowe wypełnienie wewnątrz ramki (color picker z dialogu)."""
+    def _krok_wypelnienie_ramki(self, obraz, dane: dict, config=None):
+        """Krok 2: Kolorowe wypełnienie wewnątrz ramki."""
         bleed = mm(BLEED_MM)
-        margin = mm(6)  # margines od krawędzi karty do ramki
+        margin = mm(6)
         x = bleed + margin
         y = bleed + margin
         w = SZEROKOSC - 2 * (bleed + margin)
         h = WYSOKOSC - 2 * (bleed + margin)
 
-        kolor = config.get_property("kolor_wypelnienia")
+        kolor_hex = dane.get("kolor_hex", "").strip()
+        if kolor_hex:
+            kolor = Gegl.Color.new(kolor_hex)
+        elif config:
+            kolor = config.get_property("kolor_wypelnienia")
+        else:
+            kolor = Gegl.Color.new("saddlebrown")
+
         self._nowa_warstwa_kolor(obraz, "Wypełnienie ramki", x, y, w, h, kolor)
 
-    def _krok_ramka(self, obraz, config):
+    def _krok_ramka(self, obraz, dane: dict, config=None):
         """Krok 3: Ramka/obramowanie nakładane na wierzch wypełnienia."""
-        img_tmp = self._wczytaj_plik(config.get_property("plik_ramka"))
-        if img_tmp:
+        sciezka = self._sciezka_grafiki(dane, "plik_ramka", config)
+        if sciezka:
+            img_tmp = Gimp.file_load(
+                Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(sciezka)
+            )
             self._wstaw_jako_warstwe(obraz, img_tmp, "Ramka", 0, 0, SZEROKOSC, WYSOKOSC)
 
-    def _krok_obrazki(self, obraz, config):
-        """Krok 4: Trzy opcjonalne obrazki w sekcjach górnej / środkowej / dolnej."""
+    def _krok_obrazki(self, obraz, dane: dict, config=None):
+        """Krok 4: Trzy opcjonalne obrazki w sekcjach górna / środkowa / dolna."""
         bleed = mm(BLEED_MM)
         margin = mm(8)
         x = bleed + margin
         szer = SZEROKOSC - 2 * (bleed + margin)
-        wys = mm(18)  # wysokość każdego obrazka
+        wys = mm(18)
 
-        # Y poszczególnych obrazków (proporcje dopasowane do karty)
         pozycje = [
             ("plik_img1", "Obrazek górny", int(WYSOKOSC * 0.06)),
             ("plik_img2", "Obrazek środkowy", int(WYSOKOSC * 0.32)),
@@ -457,8 +480,11 @@ class KartaHipoteczna(Gimp.PlugIn):
         ]
 
         for prop, nazwa, y in pozycje:
-            img_tmp = self._wczytaj_plik(config.get_property(prop))
-            if img_tmp:
+            sciezka = self._sciezka_grafiki(dane, prop, config)
+            if sciezka:
+                img_tmp = Gimp.file_load(
+                    Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(sciezka)
+                )
                 self._wstaw_jako_warstwe(obraz, img_tmp, nazwa, x, y, szer, wys)
 
     def _krok_linie_separatory(self, obraz):
@@ -469,7 +495,6 @@ class KartaHipoteczna(Gimp.PlugIn):
         szer = SZEROKOSC - 2 * (bleed + margin)
         grubosc = 2
 
-        # Trzy Y-pozycje linii (proporcjonalnie do wysokości)
         y_linie = [
             int(WYSOKOSC * 0.24),
             int(WYSOKOSC * 0.52),
@@ -482,53 +507,43 @@ class KartaHipoteczna(Gimp.PlugIn):
                 obraz, f"Linia {idx + 1}", x, y, szer, grubosc, kolor_zloty
             )
 
-    def _krok_teksty(self, obraz, config):
-        """Krok 6: Wszystkie warstwy tekstowe karty."""
+    def _krok_teksty(self, obraz, dane: dict):
+        """Krok 6: Wszystkie warstwy tekstowe karty – czyta z dane (dict)."""
         bleed = mm(BLEED_MM)
         margin = mm(10)
         x = bleed + margin
 
-        # Kolor tekstu – biały
         Gimp.context_set_foreground(Gegl.Color.new("white"))
 
-        # Tytuł karty (góra)
-        tytul = config.get_property("tytul")
-        self._dodaj_tekst_warstwe(obraz, tytul, x, int(WYSOKOSC * 0.03), 26)
+        self._dodaj_tekst_warstwe(
+            obraz, dane.get("tytul", ""), x, int(WYSOKOSC * 0.03), 26
+        )
+        self._dodaj_tekst_warstwe(
+            obraz, dane.get("nazwa", ""), x, int(WYSOKOSC * 0.27), 30
+        )
 
-        # Nazwa posiadłości (pod pierwszą linią)
-        nazwa = config.get_property("nazwa")
-        self._dodaj_tekst_warstwe(obraz, nazwa, x, int(WYSOKOSC * 0.27), 30)
-
-        # Obciążenie hipoteczne (pod drugą linią)
         self._dodaj_tekst_warstwe(
             obraz, "obciążenie hipoteczne", x, int(WYSOKOSC * 0.535), 16
         )
-        obciazenie = config.get_property("obciazenie")
-        self._dodaj_tekst_warstwe(obraz, obciazenie, x, int(WYSOKOSC * 0.575), 20)
+        self._dodaj_tekst_warstwe(
+            obraz, dane.get("obciazenie", ""), x, int(WYSOKOSC * 0.575), 20
+        )
 
-        # Opis (wieloliniowy, linie rozdzielone |)
-        opis = config.get_property("opis")
-        for i, linia in enumerate(opis.split("|")):
+        for i, linia in enumerate(dane.get("opis", "").split("|")):
             y = int(WYSOKOSC * 0.625) + i * mm(5)
             self._dodaj_tekst_warstwe(obraz, linia.strip(), x, y, 15)
 
-        # Koszty (pod trzecią linią)
-        k1n = config.get_property("koszt1_nazwa")
-        k1w = config.get_property("koszt1_wartosc")
-        k2n = config.get_property("koszt2_nazwa")
-        k2w = config.get_property("koszt2_wartosc")
+        k1n = dane.get("koszt1_nazwa", "")
+        k1w = dane.get("koszt1_wartosc", "")
+        k2n = dane.get("koszt2_nazwa", "")
+        k2w = dane.get("koszt2_wartosc", "")
+        prawy_x = SZEROKOSC - x - mm(15)
         self._dodaj_tekst_warstwe(obraz, k1n, x, int(WYSOKOSC * 0.755), 17)
-        self._dodaj_tekst_warstwe(
-            obraz, k1w, SZEROKOSC - x - mm(15), int(WYSOKOSC * 0.755), 17
-        )
+        self._dodaj_tekst_warstwe(obraz, k1w, prawy_x, int(WYSOKOSC * 0.755), 17)
         self._dodaj_tekst_warstwe(obraz, k2n, x, int(WYSOKOSC * 0.795), 17)
-        self._dodaj_tekst_warstwe(
-            obraz, k2w, SZEROKOSC - x - mm(15), int(WYSOKOSC * 0.795), 17
-        )
+        self._dodaj_tekst_warstwe(obraz, k2w, prawy_x, int(WYSOKOSC * 0.795), 17)
 
-        # Stopka (drobny tekst na dole)
-        stopka = config.get_property("stopka")
-        for i, linia in enumerate(stopka.split("|")):
+        for i, linia in enumerate(dane.get("stopka", "").split("|")):
             y = int(WYSOKOSC * 0.855) + i * mm(4)
             self._dodaj_tekst_warstwe(obraz, linia.strip(), x, y, 13)
 
@@ -536,9 +551,9 @@ class KartaHipoteczna(Gimp.PlugIn):
     # Zapis plików                                                         #
     # ------------------------------------------------------------------ #
 
-    def _zapisz_xcf(self, obraz, katalog):
+    def _zapisz_xcf(self, obraz, katalog: str, nazwa_pliku: str = "karta_hipoteczna"):
         """Zapisuje XCF z wszystkimi warstwami."""
-        plik = os.path.join(katalog, "karta_hipoteczna.xcf")
+        plik = os.path.join(katalog, f"{nazwa_pliku}.xcf")
         for nazwa in ("gimp-xcf-save", "file-xcf-save"):
             proc = Gimp.get_pdb().lookup_procedure(nazwa)
             if proc:
@@ -549,11 +564,11 @@ class KartaHipoteczna(Gimp.PlugIn):
                 proc.run(cfg)
                 return
 
-    def _zapisz_png(self, obraz, katalog):
+    def _zapisz_png(self, obraz, katalog: str, nazwa_pliku: str = "karta_hipoteczna"):
         """Zapisuje PNG – spłaszczona kopia obrazu."""
         kopia = obraz.duplicate()
         kopia.flatten()
-        plik = os.path.join(katalog, "karta_hipoteczna.png")
+        plik = os.path.join(katalog, f"{nazwa_pliku}.png")
 
         for nazwa in ("file-png-save", "file-png-save2"):
             proc = Gimp.get_pdb().lookup_procedure(nazwa)
