@@ -156,7 +156,10 @@ class KartaHipoteczna(BaseGeneratorPlugin):
 
         def gf(prop):
             f = config.get_property(prop)
-            return f.get_path() if f else ""
+            if not f:
+                return ""
+            path = f.get_path()
+            return path if path else f.get_uri() or ""
 
         # Kolor: Gegl.Color -> hex string
         kolor = config.get_property("kolor_wypelnienia")

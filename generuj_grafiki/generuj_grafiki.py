@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+﻿/#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 generuj_grafiki.py - prosty batch-generator grafik PNG/XCF z tekstem.
@@ -100,11 +100,12 @@ class GenerujGrafiki(BaseGeneratorPlugin):
             int(r * 255), int(g * 255), int(b * 255)
         )
         f = config.get_property("plik_tlo")
+         path = f.get_path() if f else None
         dane.update(
             {
                 "tekst": config.get_property("tekst"),
                 "kolor_hex": hex_kolor,
-                "plik_tlo": f.get_path() if f else "",
+                "plik_tlo": (path or f.get_uri() if f and not path else path or ""),
             }
         )
         return dane
