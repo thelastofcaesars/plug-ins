@@ -242,20 +242,15 @@ class KartaHipoteczna(BaseGeneratorPlugin):
             self.warstwa_z_pliku(obraz, sciezka, "Ramka", 0, 0, W, H)
 
     def _krok_obrazki(self, obraz, dane, config, bleed, W, H):
-        margin = mm(8)
-        x = bleed + margin
-        szer = W - 2 * (bleed + margin)
-        wys = mm(18)
-
         pozycje = [
-            ("plik_img1", "Obrazek gorny", int(H * 0.06)),
-            ("plik_img2", "Obrazek srodkowy", int(H * 0.32)),
-            ("plik_img3", "Obrazek dolny", int(H * 0.72)),
+            ("plik_img1", "Obrazek gorny", int(W * 0.54), int(H * 0.46)),
+            ("plik_img2", "Obrazek srodkowy", int(W * 0.85), int(H * 0.72)),
+            ("plik_img3", "Obrazek dolny", int(W * 0.85), int(H * 0.78)),
         ]
-        for prop, nazwa, y in pozycje:
+        for prop, nazwa, x, y in pozycje:
             sciezka = self.sciezka_grafiki(dane, prop, config)
             if sciezka:
-                self.warstwa_z_pliku(obraz, sciezka, nazwa, x, y, szer, wys)
+                self.warstwa_z_pliku(obraz, sciezka, nazwa, x, y)
 
     def _krok_linie(self, obraz, bleed, W, H):
         margin = mm(8)
