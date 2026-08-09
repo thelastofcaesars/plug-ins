@@ -219,10 +219,11 @@ class SchemaKartaHipoteczna(BazaSchema):
 
 
 def _normalizuj_naglowki(wiersz: dict) -> dict:
-    """Normalizuje klucze – małe litery, bez spacji."""
+    """Normalizuje klucze – małe litery, bez spacji. Pomija None-owe klucze."""
     return {
         k.strip().lower().replace(" ", "_"): (v if v is not None else "")
         for k, v in wiersz.items()
+        if k is not None and str(k).strip() != ""
     }
 
 
