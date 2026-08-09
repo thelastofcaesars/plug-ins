@@ -1,217 +1,126 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+generuj_grafiki.py - prosty batch-generator grafik PNG/XCF z tekstem.
+
+Dziedziczy po BaseGeneratorPlugin (wspolne/base_plugin.py).
+Dane moga byc wprowadzane recznie w dialogu lub wsadowo z CSV/XLSX.
+
+Schema CSV: tekst, szerokosc_mm, wysokosc_mm, kolor_hex, plik_tlo
+"""
+
 import sys
 import os
-import traceback
-import gi
 
-gi.require_version("Gimp", "3.0")
-from gi.repository import Gimp
+_WSPOLNE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wspolne")
+if _WSPOLNE not in sys.path:
+    sys.path.insert(0, _WSPOLNE)
 
-gi.require_version("GimpUi", "3.0")
-from gi.repository import GimpUi
-
-gi.require_version("GObject", "2.0")
-from gi.repository import GObject
-
-gi.require_version("GLib", "2.0")
-from gi.repository import GLib
-
-gi.require_version("Gio", "2.0")
-from gi.repository import Gio
+from loader import BaseGeneratorPlugin, mm, db as _db, Gimp, GObject, Gegl  # noqa: E402
 
 
-class GenerujGrafiki(Gimp.PlugIn):
-    def do_query_procedures(self):
-        return ["python-fu-generuj-grafiki"]
+class SchemaGrafiki(_db.BazaSchema):
+    nazwa = "Grafiki"
+    opis = "Prosty generator grafik z tekstem"
 
-    def do_create_procedure(self, name):
-        procedure = Gimp.ImageProcedure.new(
-            self, name, Gimp.PDBProcType.PLUGIN, self.run, None
+    def kolumny(self):
+        return [
+            _db.Kolumna("tekst", "Tekst na grafice", wymagana=True, domyslna="Tekst"),
+            _db.Kolumna(
+                "szerokosc_mm", "Szerokosc (mm)", wymagana=False, domyslna="80"
+            ),
+            _db.Kolumna("wysokosc_mm", "Wysokosc (mm)", wymagana=False, domyslna="60"),
+            _db.Kolumna(
+                "kolor_hex",
+                "Kolor tla (#hex)",
+                wymagana=False,
+                domyslna="#FFFFFF",
+                typ="hex",
+            ),
+            _db.Kolumna(
+                "plik_tlo", "Sciezka do tla", wymagana=False, domyslna="", typ="sciezka"
+            ),
+        ]
+
+    def przykladowe_dane(self):
+        return [
+            {
+                "tekst": "Grafika #1",
+                "szerokosc_mm": "80",
+                "wysokosc_mm": "60",
+                "kolor_hex": "#3A7CA5",
+                "plik_tlo": "",
+            },
+            {
+                "tekst": "Grafika #2",
+                "szerokosc_mm": "80",
+                "wysokosc_mm": "60",
+                "kolor_hex": "#E8A838",
+                "plik_tlo": "",
+            },
+        ]
+
+
+class GenerujGrafiki(BaseGeneratorPlugin):
+    """Prosty batch-generator grafik PNG z tekstem."""
+
+    PROCEDURE_NAME = "python-fu-generuj-grafiki"
+    MENU_LABEL = "Generuj Grafiki..."
+    OPIS_KROTKI = "Generator grafik z tekstem"
+    OPIS_DLUGI = "Tworzy grafiki PNG/XCF z tekstem, opcjonalnie wsadowo z CSV/XLSX"
+    slugify_klucz = "tekst"
+
+    szerokosc_px = mm(80)
+    wysokosc_px = mm(60)
+
+    def schema(self):
+        return SchemaGrafiki()
+
+    def rejestruj_argumenty(self, procedure):
+        rw = GObject.ParamFlags.READWRITE
+        procedure.add_string_argument("tekst", "Tekst na grafice:", "", "Moj tekst", rw)
+        procedure.add_color_argument(
+            "kolor_tla", "Kolor tla:", "", True, Gegl.Color.new("white"), rw
         )
-        procedure.set_image_types("*")
-        procedure.set_documentation(
-            "Generator Grafik", "Masowe generowanie grafik i warstw z tekstem", name
-        )
-        procedure.set_menu_label("Generuj Grafiki...")
-        procedure.add_menu_path("<Image>/Filters/Development/")
-
-        # --- REJESTRACJA ARGUMENTÓW (GIMP automatycznie zrobi z nich okienko GUI) ---
-
-        # 1. Pole liczbowe (suwak / wpisywanie)
-        procedure.add_int_argument(
-            "ilosc",
-            "Ilość grafik:",
-            "Ile warstw/plików utworzyć",
-            1,
-            50,
-            5,
-            GObject.ParamFlags.READWRITE,
-        )
-
-        # 2. Zwykłe pole tekstowe
-        procedure.add_string_argument(
-            "tekst",
-            "Własny tekst:",
-            "Tekst do umieszczenia na grafice",
-            "Próbka tekstu",
-            GObject.ParamFlags.READWRITE,
-        )
-
-        # 3. Przycisk wyboru pliku PNG
         procedure.add_file_argument(
-            "sciezka_png",
-            "Plik PNG (opcjonalnie):",
-            "Wybierz obrazek do nakładania",
+            "plik_tlo",
+            "Grafika tla (opcjonalnie):",
+            "",
             Gimp.FileChooserAction.OPEN,
             True,
             None,
-            GObject.ParamFlags.READWRITE,
+            rw,
         )
 
-        # 4. Przycisk wyboru folderu docelowego
-        procedure.add_file_argument(
-            "katalog_zapis",
-            "Folder do zapisu:",
-            "Wybierz gdzie zapisać gotowe pliki",
-            Gimp.FileChooserAction.SELECT_FOLDER,
-            True,
-            None,
-            GObject.ParamFlags.READWRITE,
+    def dane_z_config(self, config) -> dict:
+        dane = super().dane_z_config(config)
+        kolor = config.get_property("kolor_tla")
+        r, g, b, _ = kolor.get_rgba()
+        hex_kolor = "#{:02X}{:02X}{:02X}".format(
+            int(r * 255), int(g * 255), int(b * 255)
         )
+        f = config.get_property("plik_tlo")
+        dane.update(
+            {
+                "tekst": config.get_property("tekst"),
+                "kolor_hex": hex_kolor,
+                "plik_tlo": f.get_path() if f else "",
+            }
+        )
+        return dane
 
-        return procedure
-
-    def run(self, procedure, run_mode, image, drawables, config, run_data):
-
-        GimpUi.init("python-fu-generuj-grafiki")
-
-        dialog = GimpUi.ProcedureDialog.new(procedure, config, None)
-        dialog.fill(None)
-
-        if not dialog.run():
-            dialog.destroy()
-            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-
-        dialog.destroy()
-
-        try:
-            # --- ODBIÓR DANYCH Z FORMULARZA ---
-            ilosc = config.get_property("ilosc")
-            tekst = config.get_property("tekst")
-            gfile_png = config.get_property("sciezka_png")
-            gfile_zapis = config.get_property("katalog_zapis")
-
-            katalog_zapis = gfile_zapis.get_path() if gfile_zapis else None
-
-            if not katalog_zapis:
-                Gimp.message("Wybierz folder do zapisu!")
-                return procedure.new_return_values(
-                    Gimp.PDBStatusType.CALLING_ERROR, GLib.Error()
-                )
-
-            szerokosc, wysokosc = 800, 600
-
-            for i in range(1, ilosc + 1):
-                # Utwórz nowy obraz dla każdego pliku
-                nowy_obraz = Gimp.Image.new(szerokosc, wysokosc, Gimp.ImageBaseType.RGB)
-
-                # Białe tło
-                tlo = Gimp.Layer.new(
-                    nowy_obraz,
-                    "Tło",
-                    szerokosc,
-                    wysokosc,
-                    Gimp.ImageType.RGB_IMAGE,
-                    100,
-                    Gimp.LayerMode.NORMAL,
-                )
-                nowy_obraz.insert_layer(tlo, None, -1)
-                tlo.fill(Gimp.FillType.WHITE)
-
-                # Opcjonalnie: nakładanie obrazu PNG
-                if gfile_png:
-                    sciezka_png = gfile_png.get_path()
-                    if sciezka_png and os.path.isfile(sciezka_png):
-                        png_img = Gimp.file_load(
-                            Gimp.RunMode.NONINTERACTIVE,
-                            Gio.File.new_for_path(sciezka_png),
-                        )
-                        # GIMP 3.2: get_layers()[0] zamiast get_active_layer/drawable
-                        png_layer = png_img.get_layers()[0]
-                        # GIMP 3: Gimp.Layer.new_from_drawable() zamiast Gimp.layer_new_from_drawable()
-                        skopiowana = Gimp.Layer.new_from_drawable(png_layer, nowy_obraz)
-                        nowy_obraz.insert_layer(skopiowana, None, -1)
-                        png_img.delete()
-
-                # Tekst na grafice
-                # GIMP 3.2: Gimp.text_font() z obiektem Gimp.Font zamiast text_fontname ze stringiem
-                tresc = f"{tekst} #{i}"
-                # Gimp.Font.get_by_name() może zwrócić None jeśli czcionka nie istnieje
-                # Gimp.context_get_font() zawsze zwraca aktualną czcionkę z GIMP
-                font = Gimp.context_get_font()
-                # None jako drawable = GIMP tworzy nową warstwę tekstową zamiast floating selection
-                Gimp.text_font(nowy_obraz, None, 80, 50, tresc, 0, True, 35, font)
-
-                # --- ZAPIS XCF (z osobnymi warstwami, przed flatten) ---
-                plik_xcf = os.path.join(katalog_zapis, f"grafika_{i:03d}.xcf")
-                xcf_proc = Gimp.get_pdb().lookup_procedure("gimp-xcf-save")
-                if xcf_proc is None:
-                    xcf_proc = Gimp.get_pdb().lookup_procedure("file-xcf-save")
-                if xcf_proc is not None:
-                    xcf_cfg = xcf_proc.create_config()
-                    xcf_cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
-                    xcf_cfg.set_property("image", nowy_obraz)
-                    xcf_cfg.set_property("file", Gio.File.new_for_path(plik_xcf))
-                    xcf_proc.run(xcf_cfg)
-
-                # Spłaszcz obraz (dopiero teraz, po zapisie XCF)
-                nowy_obraz.flatten()
-
-                plik_wyjsciowy = os.path.join(katalog_zapis, f"grafika_{i:03d}.png")
-
-                # GIMP 3.2: eksport przez lookup_procedure + create_config + run
-                # Szukamy właściwej nazwy procedury PNG
-                mozliwe_nazwy = [
-                    "file-png-save",
-                    "file-png-save2",
-                    "gimp-file-overwrite",
-                    "file-png-export",
-                ]
-                file_proc = None
-                uzyta_nazwa = None
-                for nazwa in mozliwe_nazwy:
-                    p = Gimp.get_pdb().lookup_procedure(nazwa)
-                    if p is not None:
-                        file_proc = p
-                        uzyta_nazwa = nazwa
-                        break
-
-                if file_proc is None:
-                    raise RuntimeError(
-                        "Nie znaleziono żadnej procedury PNG do zapisu. "
-                        f"Sprawdzane nazwy: {mozliwe_nazwy}"
-                    )
-
-                file_cfg = file_proc.create_config()
-                file_cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
-                file_cfg.set_property("image", nowy_obraz)
-                file_cfg.set_property("file", Gio.File.new_for_path(plik_wyjsciowy))
-                file_cfg.set_property("options", None)
-                file_proc.run(file_cfg)
-
-                nowy_obraz.delete()
-
-            Gimp.message(f"Gotowe! Zapisano {ilosc} grafik do:\n{katalog_zapis}")
-
-        except Exception as e:
-            blad = traceback.format_exc()
-            Gimp.message(f"BŁĄD:\n{e}\n\n{blad}")
-            return procedure.new_return_values(
-                Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error()
-            )
-
-        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+    def generuj(self, obraz: Gimp.Image, dane: dict, config) -> None:
+        W = obraz.get_width()
+        H = obraz.get_height()
+        sciezka_tla = self.sciezka_grafiki(dane, "plik_tlo", config)
+        if sciezka_tla:
+            self.warstwa_z_pliku(obraz, sciezka_tla, "Tlo", 0, 0, W, H)
+        else:
+            kolor_tla = self.hex_na_kolor(dane.get("kolor_hex", ""), "white")
+            self.warstwa_kolor(obraz, "Tlo", 0, 0, W, H, kolor_tla)
+        tekst = dane.get("tekst", "")
+        margin = mm(5)
+        self.tekst(obraz, tekst, margin, H // 2 - mm(5), 30, Gegl.Color.new("black"))
 
 
 if __name__ == "__main__":
