@@ -15,8 +15,9 @@ import gi
 gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 gi.require_version("GObject", "2.0")
+gi.require_version("Gegl", "0.4")
 
-from gi.repository import Gimp, GimpUi, GObject, Gio  # noqa: E402
+from gi.repository import Gimp, GimpUi, GObject, Gio, Gegl  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,50 +30,87 @@ def _usun_kolor(obraz, r: int, g: int, b: int):
     if not warstwa.has_alpha():
         warstwa.add_alpha()
 
-    pdb = Gimp.get_pdb()
+    # Ustaw kolor pierwszoplanowy na kolor do usunięcia
+    target = Gegl.Color.new("black")
+    target.set_rgba(r / 255.0, g / 255.0, b / 255.0, 1.0)
 
-    target = Gimp.RGB()
-    target.set(r / 255.0, g / 255.0, b / 255.0)
+    stary_kolor = Gimp.context_get_foreground()
+    stary_threshold = Gimp.context_get_sample_threshold()
+    stary_merged = Gimp.context_get_sample_merged()
 
-    sel_proc = pdb.lookup_procedure("gimp-by-color-select")
-    if sel_proc:
-        cfg = sel_proc.create_config()
-        cfg.set_property("drawable", warstwa)
-        cfg.set_property("color", target)
-        cfg.set_property("threshold", 15)
-        cfg.set_property("operation", Gimp.ChannelOps.REPLACE)
-        cfg.set_property("antialias", False)
-        cfg.set_property("feather", False)
-        cfg.set_property("feather-radius", 0.0)
-        cfg.set_property("sample-merged", False)
-        sel_proc.run(cfg)
+    Gimp.context_set_foreground(target)
+    Gimp.context_set_sample_threshold(30 / 255.0)  # tolerancja ~30/255
+    Gimp.context_set_sample_merged(False)
 
-    Gimp.edit_clear(warstwa)
+    # Zaznacz po kolorze – metoda na obrazie, nie na warstwie
+    obraz.select_color(Gimp.ChannelOps.REPLACE, warstwa, target)
 
-    none_proc = pdb.lookup_procedure("gimp-selection-none")
-    if none_proc:
-        cfg2 = none_proc.create_config()
-        cfg2.set_property("image", obraz)
-        none_proc.run(cfg2)
+    # Sprawdź czy zaznaczenie nie obejmuje całego obrazu (zabezpieczenie)
+    W = obraz.get_width()
+    H = obraz.get_height()
+    bounds = Gimp.Selection.bounds(obraz)
+    # bounds zwraca (non_empty, x1, y1, x2, y2)
+    if len(bounds) >= 5 and bounds[0]:
+        sel_w = bounds[3] - bounds[1]
+        sel_h = bounds[4] - bounds[2]
+        if sel_w >= W and sel_h >= H:
+            # całe zaznaczenie = coś nie tak, cofnij
+            Gimp.Selection.none(obraz)
+        else:
+            warstwa.edit_clear()
+            Gimp.Selection.none(obraz)
+    else:
+        # brak zaznaczenia – kolor nie znaleziony, OK
+        pass
+
+    # Przywróć kontekst
+    Gimp.context_set_foreground(stary_kolor)
+    Gimp.context_set_sample_threshold(stary_threshold)
+    Gimp.context_set_sample_merged(stary_merged)
+
+
+def _znajdz_procedure_png(pdb):
+    """Zwraca pierwszą dostępną procedurę zapisu PNG lub None."""
+    kandydaci = [
+        "file-png-save",
+        "file-png-save2",
+        "gimp-file-overwrite",
+        "plug-in-png",
+        "file-png-export",
+    ]
+    for nazwa in kandydaci:
+        proc = pdb.lookup_procedure(nazwa)
+        if proc is not None:
+            return nazwa, proc
+    # Diagnostyka – wypisz wszystkie procedury zawierające "png"
+    dostepne = []
+    for nazwa in kandydaci:
+        dostepne.append(f"{nazwa}: {'OK' if pdb.lookup_procedure(nazwa) else 'brak'}")
+    raise RuntimeError(
+        "Nie znaleziono procedury PNG w PDB!\n"
+        + "\n".join(dostepne)
+        + '\n\nSprawdź w Script-Fu: (car (gimp-pdb-proc-exists "file-png-save"))'
+    )
 
 
 def _zapisz_png(obraz, sciezka_png: str):
-    """Spłaszcza obraz i zapisuje jako PNG przez file-png-save."""
+    """Eksportuje obraz jako PNG."""
+    gfile = Gio.File.new_for_path(sciezka_png)
     pdb = Gimp.get_pdb()
-    proc = pdb.lookup_procedure("file-png-save")
+    proc_name, proc = _znajdz_procedure_png(pdb)
     cfg = proc.create_config()
     cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
     cfg.set_property("image", obraz)
-    cfg.set_property("drawable", obraz.get_layers()[0])
-    cfg.set_property("file", Gio.File.new_for_path(sciezka_png))
-    # opcje PNG
-    cfg.set_property("interlace", 0)
-    cfg.set_property("compression", 9)
-    cfg.set_property("bkgd", 0)
-    cfg.set_property("gama", 0)
-    cfg.set_property("offs", 0)
-    cfg.set_property("phys", 0)
-    cfg.set_property("time", 0)
+    try:
+        cfg.set_property("drawable", obraz.get_layers()[0])
+    except Exception:
+        pass
+    cfg.set_property("file", gfile)
+    for opt, val in [("interlace", 0), ("compression", 9)]:
+        try:
+            cfg.set_property(opt, val)
+        except Exception:
+            pass
     proc.run(cfg)
 
 
@@ -85,7 +123,12 @@ def konwertuj_plik(sciezka_bmp: str, r: int, g: int, b: int) -> str:
 
     _usun_kolor(obraz, r, g, b)
 
-    sciezka_png = os.path.splitext(sciezka_bmp)[0] + ".png"
+    sciezka_png = os.path.join(
+        os.path.dirname(sciezka_bmp),
+        "png",
+        os.path.splitext(os.path.basename(sciezka_bmp))[0] + ".png",
+    )
+    os.makedirs(os.path.dirname(sciezka_png), exist_ok=True)
     _zapisz_png(obraz, sciezka_png)
     obraz.delete()
     return sciezka_png
