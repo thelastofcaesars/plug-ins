@@ -4,7 +4,7 @@ base_plugin.py – bazowa klasa pluginu GIMP dla generatorów grafik z bazą dan
 Każdy plugin dziedziczy po BaseGeneratorPlugin i implementuje:
     - PROCEDURE_NAME   : str   – unikalny identyfikator procedury
     - MENU_LABEL       : str   – etykieta w menu GIMP
-    - MENU_PATH        : str   – ścieżka menu (domyślnie <Image>/Filters/Development/)
+    - MENU_PATH        : str   – ścieżka menu (domyślnie <Image>/Filtry/GeneratorKart/)
     - schema()         – zwraca instancję BazaSchema dla tego pluginu
     - rejestruj_argumenty(procedure) – rejestruje pola specyficzne dla pluginu
     - generuj(obraz, dane, config)   – buduje zawartość obrazu
@@ -78,7 +78,7 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
     # --- do nadpisania ---
     PROCEDURE_NAME: str = "python-fu-base-generator"
     MENU_LABEL: str = "Generator (base)"
-    MENU_PATH: str = "<Image>/Filters/Development/"
+    MENU_PATH: str = "<Image>/Filtry/GeneratorKart/"
     OPIS_KROTKI: str = "Generator grafik"
     OPIS_DLUGI: str = "Generator grafik z obsługą bazy danych"
     slugify_klucz: str = "nazwa"  # kolumna używana do nazwy pliku wynikowego
@@ -98,6 +98,11 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
             self, name, Gimp.PDBProcType.PLUGIN, self.run, None
         )
         procedure.set_image_types("*")
+        procedure.set_sensitivity_mask(
+            Gimp.ProcedureSensitivityMask.DRAWABLE
+            | Gimp.ProcedureSensitivityMask.NO_DRAWABLES
+            | Gimp.ProcedureSensitivityMask.NO_IMAGE
+        )
         procedure.set_documentation(self.OPIS_KROTKI, self.OPIS_DLUGI, name)
         procedure.set_menu_label(self.MENU_LABEL)
         procedure.add_menu_path(self.MENU_PATH)
