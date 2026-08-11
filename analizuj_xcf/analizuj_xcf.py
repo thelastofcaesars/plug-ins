@@ -17,6 +17,7 @@ Wynikowy JSON można wkleić jako punkt wyjścia do generowania skryptów.
 import sys
 import os
 import json
+import re
 
 import gi
 
@@ -25,7 +26,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("GObject", "2.0")
 gi.require_version("Gegl", "0.4")
 
-from gi.repository import Gimp, GimpUi, GObject  # noqa: E402
+from gi.repository import Gimp, GimpUi, GObject, Gio  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -84,12 +85,40 @@ def _just_nazwa(just) -> str:
         return "LEFT"
 
 
+def _slugify(nazwa: str) -> str:
+    """Zamienia nazwę warstwy na bezpieczną nazwę pliku."""
+    slug = re.sub(r"[^\w\-]", "_", nazwa)
+    return slug[:60] or "warstwa"
+
+
+def _eksportuj_warstwe_png(warstwa, katalog_png: str) -> str:
+    """Zwraca oczekiwaną ścieżkę PNG (bez eksportu – eksportuj ręcznie Batcherem)."""
+    nazwa_pliku = _slugify(warstwa.get_name()) + ".png"
+    return os.path.join(katalog_png, nazwa_pliku)
+
+
+def _tekst_warstwy(warstwa) -> str:
+    """Pobiera tekst z warstwy tekstowej – przez markup (get_text zwraca None w GIMP 3.2)."""
+    # get_markup() zwraca Pango markup – wyciągamy czysty tekst regexem
+    try:
+        markup = warstwa.get_markup()
+        if markup:
+            tekst = re.sub(r"<[^>]+>", "", str(markup))
+            tekst = (
+                tekst.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            )
+            return tekst.strip()
+    except Exception:
+        pass
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Analiza warstw
 # ---------------------------------------------------------------------------
 
 
-def _analizuj_warstwe(warstwa, W: int, H: int) -> dict:
+def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
     x, y = _offset(warstwa)
     w = warstwa.get_width()
     h = warstwa.get_height()
@@ -120,17 +149,14 @@ def _analizuj_warstwe(warstwa, W: int, H: int) -> dict:
         info["typ"] = "grupa"
         dzieci = []
         for dziecko in warstwa.get_children():
-            dzieci.append(_analizuj_warstwe(dziecko, W, H))
+            dzieci.append(_analizuj_warstwe(dziecko, W, H, katalog_png))
         info["dzieci"] = dzieci
 
     elif warstwa.is_text_layer():
         info["typ"] = "tekst"
 
-        # treść
-        try:
-            info["tekst"] = warstwa.get_text()
-        except Exception:
-            info["tekst"] = ""
+        # treść – przez PDB (najbardziej niezawodne)
+        info["tekst"] = _tekst_warstwy(warstwa)
 
         # czcionka
         try:
@@ -215,6 +241,10 @@ def _analizuj_warstwe(warstwa, W: int, H: int) -> dict:
         if x == 0 and y == 0 and w == W and h == H:
             info["uwaga"] = "pokrywa cały obraz (tło?)"
 
+        # eksport warstwy do PNG
+        info["path"] = ""
+        if katalog_png:
+            info["path"] = _eksportuj_warstwe_png(warstwa, katalog_png)
     # tryb mieszania
     try:
         mode = warstwa.get_mode()
@@ -235,7 +265,7 @@ def _analizuj_warstwe(warstwa, W: int, H: int) -> dict:
     return info
 
 
-def analizuj_obraz(obraz) -> dict:
+def analizuj_obraz(obraz, katalog_png: str = "") -> dict:
     W = obraz.get_width()
     H = obraz.get_height()
 
@@ -260,7 +290,7 @@ def analizuj_obraz(obraz) -> dict:
 
     # Pobierz warstwy płasko (GIMP zwraca od góry do dołu)
     for warstwa in obraz.get_layers():
-        wynik["warstwy"].append(_analizuj_warstwe(warstwa, W, H))
+        wynik["warstwy"].append(_analizuj_warstwe(warstwa, W, H, katalog_png))
 
     return wynik
 
@@ -359,7 +389,9 @@ class AnalizujXcf(Gimp.PlugIn):
             tylko_widoczne = False
 
         try:
-            dane = analizuj_obraz(image)
+            # Folder PNG = obok JSON, nazwa bez rozszerzenia
+            katalog_png = os.path.splitext(sciezka)[0]
+            dane = analizuj_obraz(image, katalog_png)
 
             if tylko_widoczne:
                 # Filtruj warstwy niewidoczne (płasko, bez wchodzenia w grupy)
