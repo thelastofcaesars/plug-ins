@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Ekstrakcja tekstu z PDF do CSV – każda strona to osobny wiersz."""
 
-import csv
 import json
 import os
 import re
@@ -41,17 +40,28 @@ print(json.dumps(out, ensure_ascii=False))
 """
 
 
-def _python_z_pdfplumber() -> str:
-    """Zwraca ścieżkę do interpretera Pythona, który ma pdfplumber."""
+def _znajdz_python(modul: str) -> str:
     for name in ("python", "python3"):
         exe = shutil.which(name)
         if exe and os.path.normcase(exe) != os.path.normcase(sys.executable):
-            r = subprocess.run([exe, "-c", "import pdfplumber"], capture_output=True)
+            r = subprocess.run([exe, "-c", f"import {modul}"], capture_output=True)
             if r.returncode == 0:
                 return exe
     raise ImportError(
-        "Nie znaleziono Pythona z pdfplumber. Zainstaluj: pip install pdfplumber"
+        f"Nie znaleziono Pythona z {modul}. Zainstaluj: pip install {modul}"
     )
+
+
+_XLSX_HELPER = """
+import sys, json, openpyxl
+xlsx_path, tryb = sys.argv[1], sys.argv[2]
+wiersze = json.loads(sys.stdin.read())
+wb = openpyxl.load_workbook(xlsx_path) if __import__('os').path.exists(xlsx_path) else openpyxl.Workbook()
+ws = wb.active
+for row in wiersze:
+    ws.append(row)
+wb.save(xlsx_path)
+"""
 
 
 def wczytaj_strony(
@@ -85,7 +95,7 @@ def wczytaj_strony(
         pass
 
     # Fallback: wywołaj systemowego Pythona z pdfplumber przez subprocess
-    exe = _python_z_pdfplumber()
+    exe = _znajdz_python("pdfplumber")
     r = subprocess.run(
         [exe, "-c", _HELPER, pdf_path, str(tylko_strona), lang, TESSERACT_EXE],
         capture_output=True,
@@ -151,7 +161,10 @@ def parsuj_karte_hipoteczna(tekst: str, tytul: str) -> list[str]:
         for l in linie
         if not re.fullmatch(r"karta(\s+hipoteczna)?|hipoteczna", l, re.IGNORECASE)
     ]
-
+    normal_card = any(
+        re.search(r"rozbudowa\s+kosztuje|kapitol\s+kosztuje", l, re.IGNORECASE)
+        for l in linie
+    )
     idx_ob = next(
         (
             i
@@ -172,11 +185,15 @@ def parsuj_karte_hipoteczna(tekst: str, tytul: str) -> list[str]:
         nazwa,
         obciazenie,
         "ta karta musi byc tak odwrocona|jezeli posiadlosc|jest zastawiona",
-        "rozbudowa kosztuje",
+        "rozbudowa kosztuje" if normal_card else "",
         pierwsza_liczba_po(r"rozbudowa\s+kosztuje"),
-        "kapitol kosztuje",
+        "kapitol kosztuje" if normal_card else "",
         pierwsza_liczba_po(r"kapitol\s+kosztuje"),
-        "mozna dokonac tylko 1 rozbudowy na ture|mozna wybudowac tylko|1 kapitol w jednym panstwie",
+        (
+            "mozna dokonac tylko 1 rozbudowy na ture|mozna wybudowac tylko|1 kapitol w jednym panstwie"
+            if normal_card
+            else ""
+        ),
         "",
         "H:\\herobusiness\\bg.png",
         "H:\\herobusiness\\ramka.png",
@@ -219,6 +236,7 @@ def parsuj_akt_wlasnosci(tekst: str, tytul: str) -> list[str]:
             r"akt(\s+w[łl]asno[śs]ci)?|akt\s+w[eę]asno[śs]ci", l, re.IGNORECASE
         )
     ]
+    print(linie)
 
     def wyciagnij(linia: str) -> str:
         m = re.search(r"(\d+)", linia)
@@ -330,6 +348,58 @@ def zapisz_csv(
                 writer.writerow([nr, tekst])
 
 
+def zapisz_xlsx(
+    wiersze: list[tuple[int, str]],
+    xlsx_path: str,
+    tytul: str | None = None,
+    tryb: str = "raw",
+) -> None:
+    kolumny = {"hipoteczna": KOLUMNY_KARTY, "akt": KOLUMNY_AKTU}.get(tryb)
+    parsery = {"hipoteczna": parsuj_karte_hipoteczna, "akt": parsuj_akt_wlasnosci}
+
+    naglowek = ["strona"] + (kolumny if kolumny else ["tekst"])
+    nowe_wiersze = []
+    for nr, tekst in wiersze:
+        if kolumny:
+            nowe_wiersze.append([nr] + parsery[tryb](tekst, tytul or ""))
+        else:
+            nowe_wiersze.append([nr, tekst])
+
+    try:
+        import openpyxl
+
+        wb = (
+            openpyxl.load_workbook(xlsx_path)
+            if os.path.exists(xlsx_path)
+            else openpyxl.Workbook()
+        )
+        ws = wb.active
+        if ws.max_row == 1 and ws.max_column == 1 and ws.cell(1, 1).value is None:
+            ws.append(naglowek)
+        for row in nowe_wiersze:
+            ws.append(row)
+        wb.save(xlsx_path)
+        return
+    except ImportError:
+        pass
+
+    # Fallback: subprocess z systemowym Pythonem
+    exe = _znajdz_python("openpyxl")
+    dane = json.dumps(
+        [naglowek] + nowe_wiersze if not os.path.exists(xlsx_path) else nowe_wiersze,
+        ensure_ascii=False,
+    )
+    r = subprocess.run(
+        [exe, "-c", _XLSX_HELPER, xlsx_path, tryb],
+        input=dane,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"B\u0142\u0105d zapisu XLSX:\n{r.stderr}")
+
+
 def dialog_blad(okno, komunikat: str) -> None:
     dlg = Gtk.MessageDialog(
         transient_for=okno,
@@ -356,7 +426,7 @@ def dialog_info(okno, komunikat: str) -> None:
 
 class Aplikacja(Gtk.Window):
     def __init__(self):
-        super().__init__(title="PDF \u2192 CSV")
+        super().__init__(title="PDF \u2192 XLS")
         self.set_border_width(10)
         self.set_resizable(False)
         self.connect("destroy", Gtk.main_quit)
@@ -381,7 +451,7 @@ class Aplikacja(Gtk.Window):
         # --- CSV ---
         hbox_csv = Gtk.Box(spacing=6)
         vbox.pack_start(hbox_csv, False, False, 0)
-        hbox_csv.pack_start(Gtk.Label(label="Plik CSV (wynik):"), False, False, 0)
+        hbox_csv.pack_start(Gtk.Label(label="Plik XLSX (wynik):"), False, False, 0)
         self.entry_csv = Gtk.Entry()
         self.entry_csv.set_width_chars(55)
         hbox_csv.pack_start(self.entry_csv, True, True, 0)
@@ -463,7 +533,7 @@ class Aplikacja(Gtk.Window):
         btn_podglad = Gtk.Button(label=f"Podgl\u0105d (strona 1 lub wybrana)")
         btn_podglad.connect("clicked", self._podglad)
         hbox_btn.pack_start(btn_podglad, True, True, 0)
-        btn_zapisz = Gtk.Button(label="Zapisz do CSV")
+        btn_zapisz = Gtk.Button(label="Zapisz do XLSX")
         btn_zapisz.get_style_context().add_class("suggested-action")
         btn_zapisz.connect("clicked", self._zapisz)
         hbox_btn.pack_start(btn_zapisz, True, True, 0)
@@ -521,12 +591,12 @@ class Aplikacja(Gtk.Window):
             path = dlg.get_filename()
             self.entry_pdf.set_text(path)
             if not self.entry_csv.get_text():
-                self.entry_csv.set_text(os.path.splitext(path)[0] + ".csv")
+                self.entry_csv.set_text(os.path.splitext(path)[0] + ".xlsx")
         dlg.destroy()
 
     def _wybierz_csv(self, _):
         dlg = Gtk.FileChooserDialog(
-            title="Zapisz CSV jako\u2026",
+            title="Zapisz XLSX jako\u2026",
             parent=self,
             action=Gtk.FileChooserAction.SAVE,
         )
@@ -537,7 +607,7 @@ class Aplikacja(Gtk.Window):
             Gtk.ResponseType.OK,
         )
         dlg.set_do_overwrite_confirmation(True)
-        dlg.set_current_name("wynik.csv")
+        dlg.set_current_name("wynik.xlsx")
         if dlg.run() == Gtk.ResponseType.OK:
             self.entry_csv.set_text(dlg.get_filename())
         dlg.destroy()
@@ -550,7 +620,7 @@ class Aplikacja(Gtk.Window):
             dialog_blad(self, "Wybierz istniej\u0105cy plik PDF.")
             return False
         if not self.entry_csv.get_text():
-            dialog_blad(self, "Podaj \u015bcie\u017ck\u0119 do pliku CSV.")
+            dialog_blad(self, "Podaj \u015bcie\u017ck\u0119 do pliku XLSX.")
             return False
         return True
 
@@ -564,7 +634,7 @@ class Aplikacja(Gtk.Window):
         if not self._waliduj():
             return
         try:
-            strona = self._tylko_strona()
+            strona = self._tylko_strona() or 1  # podgląd zawsze zaczyna od str. 1
             wiersze = wczytaj_strony(
                 self.entry_pdf.get_text(), tylko_strona=strona, lang=self._lang()
             )
@@ -596,7 +666,7 @@ class Aplikacja(Gtk.Window):
             wiersze = wczytaj_strony(
                 self.entry_pdf.get_text(), self._tylko_strona(), self._lang()
             )
-            zapisz_csv(wiersze, self.entry_csv.get_text(), self._tytul(), self._tryb())
+            zapisz_xlsx(wiersze, self.entry_csv.get_text(), self._tytul(), self._tryb())
             self._log(
                 f"Zapisano {len(wiersze)} wiersz(y) \u2192 {self.entry_csv.get_text()}"
             )
