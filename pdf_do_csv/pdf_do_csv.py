@@ -115,6 +115,24 @@ KOLUMNY_KARTY = [
     "plik_img3",
 ]
 
+KOLUMNY_AKTU = [
+    "tytul",
+    "nazwa",
+    "opis_zakup",
+    "cena_zakupu",
+    "postoj_niezabudowany",
+    "postoj_osada",
+    "postoj_miasto",
+    "postoj_ratusz",
+    "postoj_kapitol",
+    "stopka",
+    "kolor_hex",
+    "plik_tlo",
+    "plik_ramka",
+    "plik_ramka_mini",
+    "plik_gold",
+]
+
 
 def parsuj_karte_hipoteczna(tekst: str, tytul: str) -> list[str]:
     def pierwsza_liczba_w_linii(linia: str) -> str:
@@ -168,22 +186,86 @@ def parsuj_karte_hipoteczna(tekst: str, tytul: str) -> list[str]:
     ]
 
 
+def parsuj_akt_wlasnosci(tekst: str, tytul: str) -> list[str]:
+    opis_zakup = "Cena zakupu\nOpłata za  postój:"
+    stopka = (
+        "jeśli gracz posiada wszystkie miasta\n"
+        "w tej krainie i są one niezabudowane\n"
+        "to opłata jest podwójna"
+    )
+    linie = [l.strip() for l in tekst.splitlines() if l.strip()]
+    linie = [
+        l
+        for l in linie
+        if not re.fullmatch(r"akt(\s+w[łl]asno[śs]ci)?", l, re.IGNORECASE)
+    ]
+    print(linie)
+
+    # nazwa = pierwsza linia niebędąca etykietą ani liczbą
+    etykiety = r"cena|zakupu|op[łl]ata|posto[jj]|teren|rad[aą]|ratusz|kapitol|gracz|krainie|niezabudowany"
+    nazwa = ""
+    for linia in linie:
+        if not re.search(etykiety, linia, re.IGNORECASE) and not re.match(
+            r"^[-•]", linia
+        ):
+            nazwa = linia
+            break
+
+    # zbierz linie zawierające samotną liczbę (z ewentualnym szumem OCR)
+    def liczby_standalone() -> list[str]:
+        wynik = []
+        for linia in linie:
+            if re.search(r"\d", linia) and not re.search(
+                r"[a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ]{3,}", linia
+            ):
+                m = re.search(r"(\d+)", linia)
+                if m:
+                    wynik.append(m.group(1))
+        return wynik
+
+    nums = liczby_standalone()
+
+    def n(i):
+        return nums[i] if i < len(nums) else ""
+
+    return [
+        tytul,
+        nazwa,
+        opis_zakup,
+        n(0),  # nr karty
+        n(0),  # cena_zakupu
+        n(1),  # postoj_niezabudowany
+        n(2),  # postoj_osada
+        n(3),  # postoj_miasto
+        n(4),  # postoj_ratusz
+        n(5),  # postoj_kapitol
+        stopka,
+        "H:\\herobusiness\\bg.png",
+        "H:\\herobusiness\\ramka.png",
+        "H:\\herobusiness\\ramka_mini.png",
+        "H:\\herobusiness\\gold.png",
+    ]
+
+
 def zapisz_csv(
     wiersze: list[tuple[int, str]],
     csv_path: str,
-    tytul_const: str | None = None,
+    tytul: str | None = None,
+    tryb: str = "raw",
 ) -> None:
+    kolumny = {"hipoteczna": KOLUMNY_KARTY, "akt": KOLUMNY_AKTU}.get(tryb)
+    parsery = {
+        "hipoteczna": parsuj_karte_hipoteczna,
+        "akt": parsuj_akt_wlasnosci,
+    }
     istnieje = os.path.exists(csv_path)
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, delimiter=";")
         if not istnieje:
-            naglowek = ["strona"] + (
-                KOLUMNY_KARTY if tytul_const is not None else ["tekst"]
-            )
-            writer.writerow(naglowek)
+            writer.writerow(["strona"] + (kolumny if kolumny else ["tekst"]))
         for nr, tekst in wiersze:
-            if tytul_const is not None:
-                writer.writerow([nr] + parsuj_karte_hipoteczna(tekst, tytul_const))
+            if kolumny:
+                writer.writerow([nr] + parsery[tryb](tekst, tytul or ""))
             else:
                 writer.writerow([nr, tekst])
 
@@ -284,24 +366,32 @@ class Aplikacja(Gtk.Window):
         self.combo_lang.set_active_id("pol+eng")
         hbox_lang.pack_start(self.combo_lang, False, False, 0)
 
-        # --- Kolumny ---
-        ramka_kol = Gtk.Frame(label="Parsowanie kart hipotecznych")
+        # --- Tryb parsowania ---
+        ramka_kol = Gtk.Frame(label="Tryb parsowania")
         vbox.pack_start(ramka_kol, False, False, 0)
         vbox_kol = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         vbox_kol.set_border_width(6)
         ramka_kol.add(vbox_kol)
 
-        self.chk_kolumny = Gtk.CheckButton(
-            label="Parsuj struktur\u0119 karty hipotecznej"
+        self.radio_raw = Gtk.RadioButton(label="Brak parsowania (tekst)")
+        self.radio_raw.connect("toggled", self._przelacz_parsowanie)
+        vbox_kol.pack_start(self.radio_raw, False, False, 0)
+
+        self.radio_hipoteczna = Gtk.RadioButton.new_with_label_from_widget(
+            self.radio_raw, "Karta hipoteczna"
         )
-        self.chk_kolumny.connect("toggled", self._przelacz_kolumny)
-        vbox_kol.pack_start(self.chk_kolumny, False, False, 0)
+        self.radio_hipoteczna.connect("toggled", self._przelacz_parsowanie)
+        vbox_kol.pack_start(self.radio_hipoteczna, False, False, 0)
+
+        self.radio_akt = Gtk.RadioButton.new_with_label_from_widget(
+            self.radio_raw, "Akt w\u0142asno\u015bci"
+        )
+        self.radio_akt.connect("toggled", self._przelacz_parsowanie)
+        vbox_kol.pack_start(self.radio_akt, False, False, 0)
 
         hbox_kol = Gtk.Box(spacing=6)
         vbox_kol.pack_start(hbox_kol, False, False, 0)
-        hbox_kol.pack_start(
-            Gtk.Label(label="Sta\u0142y tytu\u0142 (tytul):"), False, False, 0
-        )
+        hbox_kol.pack_start(Gtk.Label(label="Sta\u0142y tytu\u0142:"), False, False, 0)
         self.entry_tytul = Gtk.Entry()
         self.entry_tytul.set_text("KARTA HIPOTECZNA")
         self.entry_tytul.set_sensitive(False)
@@ -335,13 +425,23 @@ class Aplikacja(Gtk.Window):
     def _przelacz_tryb(self, _=None):
         self.spin.set_sensitive(self.radio_jedna.get_active())
 
-    def _przelacz_kolumny(self, _=None):
-        self.entry_tytul.set_sensitive(self.chk_kolumny.get_active())
+    def _przelacz_parsowanie(self, _=None):
+        tryb = self._tryb()
+        self.entry_tytul.set_sensitive(tryb != "raw")
+        if tryb == "hipoteczna" and not self.entry_tytul.get_text():
+            self.entry_tytul.set_text("KARTA HIPOTECZNA")
+        elif tryb == "akt" and self.entry_tytul.get_text() == "KARTA HIPOTECZNA":
+            self.entry_tytul.set_text("AKT W\u0141ASNO\u015aCI")
 
-    def _tytul_const(self) -> str | None:
-        if not self.chk_kolumny.get_active():
-            return None
-        return self.entry_tytul.get_text() or "KARTA HIPOTECZNA"
+    def _tryb(self) -> str:
+        if self.radio_hipoteczna.get_active():
+            return "hipoteczna"
+        if self.radio_akt.get_active():
+            return "akt"
+        return "raw"
+
+    def _tytul(self) -> str:
+        return self.entry_tytul.get_text()
 
     def _wybierz_pdf(self, _):
         dlg = Gtk.FileChooserDialog(
@@ -410,11 +510,16 @@ class Aplikacja(Gtk.Window):
             )
             if wiersze:
                 nr, tekst = wiersze[0]
-                tytul = self._tytul_const()
-                if tytul is not None:
-                    sparsowane = parsuj_karte_hipoteczna(tekst, tytul)
+                tryb = self._tryb()
+                parsery = {
+                    "hipoteczna": (parsuj_karte_hipoteczna, KOLUMNY_KARTY),
+                    "akt": (parsuj_akt_wlasnosci, KOLUMNY_AKTU),
+                }
+                if tryb in parsery:
+                    parser, kolumny = parsery[tryb]
+                    sparsowane = parser(tekst, self._tytul())
                     podgląd = "\n".join(
-                        f"{k}: {v}" for k, v in zip(KOLUMNY_KARTY, sparsowane) if v
+                        f"{k}: {v}" for k, v in zip(kolumny, sparsowane) if v
                     )
                 else:
                     podgląd = tekst[:500]
@@ -431,7 +536,7 @@ class Aplikacja(Gtk.Window):
             wiersze = wczytaj_strony(
                 self.entry_pdf.get_text(), self._tylko_strona(), self._lang()
             )
-            zapisz_csv(wiersze, self.entry_csv.get_text(), self._tytul_const())
+            zapisz_csv(wiersze, self.entry_csv.get_text(), self._tytul(), self._tryb())
             self._log(
                 f"Zapisano {len(wiersze)} wiersz(y) \u2192 {self.entry_csv.get_text()}"
             )
