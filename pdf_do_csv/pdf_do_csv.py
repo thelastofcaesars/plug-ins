@@ -127,6 +127,7 @@ def parsuj_karte_hipoteczna(tekst: str, tytul: str) -> list[str]:
         return m.group(1) if m else ""
 
     linie = [l.strip() for l in tekst.splitlines() if l.strip()]
+
     linie = [
         l
         for l in linie
@@ -309,7 +310,7 @@ class Aplikacja(Gtk.Window):
         # --- Przyciski ---
         hbox_btn = Gtk.Box(spacing=8)
         vbox.pack_start(hbox_btn, False, False, 0)
-        btn_podglad = Gtk.Button(label="Podgl\u0105d (strona 1)")
+        btn_podglad = Gtk.Button(label=f"Podgl\u0105d (strona 1 lub wybrana)")
         btn_podglad.connect("clicked", self._podglad)
         hbox_btn.pack_start(btn_podglad, True, True, 0)
         btn_zapisz = Gtk.Button(label="Zapisz do CSV")
@@ -403,8 +404,9 @@ class Aplikacja(Gtk.Window):
         if not self._waliduj():
             return
         try:
+            strona = self._tylko_strona()
             wiersze = wczytaj_strony(
-                self.entry_pdf.get_text(), tylko_strona=1, lang=self._lang()
+                self.entry_pdf.get_text(), tylko_strona=strona, lang=self._lang()
             )
             if wiersze:
                 nr, tekst = wiersze[0]
@@ -416,9 +418,9 @@ class Aplikacja(Gtk.Window):
                     )
                 else:
                     podgląd = tekst[:500]
-                self._log(f"--- Strona 1 (podgl\u0105d) ---\n{podgląd}\n---")
+                self._log(f"--- Strona {strona} (podgl\u0105d) ---\n{podgląd}\n---")
             else:
-                self._log("Strona 1 jest pusta.")
+                self._log(f"Strona {strona} jest pusta.")
         except Exception as e:
             dialog_blad(self, str(e))
 
