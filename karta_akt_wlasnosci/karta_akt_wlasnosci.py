@@ -27,7 +27,7 @@ KARTA_H_MM = 90
 
 # Współrzędne z awers.json: x_rel/y_rel/ułamek obrazu dla 591x1063 px
 _REL = {
-    "bg": (0.0, 0.04704, 1.0, 0.9539),
+    "bg": (0.0, 0.0, 1.0, 1.0),
     "ramka_color": (0.04061, 0.02258, 0.91878, 0.95484),
     "ramka_mini": (0.18274, 0.20226, 0.63283, 0.29445),
     "typ_karty_y": 0.08655,
@@ -236,7 +236,7 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
                 ("gold_rada_osady", 0.79188, 0.65475),
                 ("gold_rada_miasta", 0.79188, 0.69238),
                 ("gold_ratusz", 0.79188, 0.73001),
-                ("gold_kapitol", 0.79357, 0.76952),
+                ("gold_kapitol", 0.79188, 0.76952),
             ]
             for nazwa, x_rel, y_rel in pozycje:
                 x, y = self._rel_xy(W, H, x_rel, y_rel)
@@ -252,7 +252,7 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
             tytul,
             int(W * 0.5),
             int(H * _REL["typ_karty_y"]),
-            26,
+            19,
             bialy,
         )
         self.tekst(
@@ -260,31 +260,53 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
             dane.get("nazwa", ""),
             int(W * 0.5),
             int(H * _REL["nazwa_y"]),
-            26,
+            42,
             bialy,
         )
 
-        # wpisy sekcji zakupu
         opis_x = int(W * _REL["opis_x"])
         ceny_x = int(W * _REL["ceny_x"])
-        for etykieta, klucz, y_key in _KOSZTY:
-            y_pos = int(H * _REL[y_key])
-            if etykieta == "Cena zakupu":
-                self.tekst(obraz, etykieta, opis_x, y_pos, 20, bialy)
-                self.tekst(obraz, dane.get(klucz, ""), ceny_x, y_pos, 20, bialy)
-            else:
-                self.tekst(obraz, etykieta, opis_x, y_pos, 17, bialy)
-                self.tekst(obraz, dane.get(klucz, ""), ceny_x, y_pos, 17, bialy)
+        y_blok = int(H * _REL["y_zakup"])
 
-        for i, linia in enumerate((dane.get("stopka") or "").split("|")):
-            self.tekst(
-                obraz,
-                linia.strip(),
-                0,
-                int(H * _REL["stopka_y"]) + i * mm(4),
-                12,
-                bialy,
+        opis = (dane.get("opis_zakup") or "").strip()
+        if not opis:
+            opis = (
+                "Cena zakupu\n"
+                "Opłata za postój:\n"
+                "- teren niezabudowany\n"
+                "- teren z radą osady\n"
+                "- teren z radą miasta\n"
+                "- teren z ratuszem\n"
+                "- teren z kapitolem"
             )
+
+        ceny = "\n".join(
+            part
+            for part in [
+                dane.get("cena_zakupu") or "",
+                "",
+                dane.get("postoj_niezabudowany", ""),
+                dane.get("postoj_osada", ""),
+                dane.get("postoj_miasto", ""),
+                dane.get("postoj_ratusz", ""),
+                dane.get("postoj_kapitol", ""),
+            ]
+            if part
+        )
+
+        self.tekst(obraz, opis, opis_x, y_blok, 27, bialy)
+        self.tekst(obraz, ceny, ceny_x, y_blok, 27, bialy)
+        stopka = ""
+        for i, linia in enumerate((dane.get("stopka") or "").split("|")):
+            stopka += linia.strip() + "\n"
+        self.tekst(
+            obraz,
+            stopka,
+            0,
+            int(H * _REL["stopka_y"]) + i * mm(4),
+            20,
+            bialy,
+        )
 
 
 if __name__ == "__main__":
