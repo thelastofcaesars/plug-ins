@@ -195,6 +195,125 @@ class SchemaKartaHipoteczna(BazaSchema):
         ]
 
 
+class SchemaAktWlasnosci(BazaSchema):
+    """Schema dla kart aktu własności (monopoly-style)."""
+
+    nazwa = "Akt Własności"
+    opis = "Karty własności z ceną zakupu i opłatami za postój"
+
+    def kolumny(self) -> list[Kolumna]:
+        return [
+            Kolumna("tytul", "Tytuł karty", wymagana=True, domyslna="AKT WŁASNOŚCI"),
+            Kolumna("nazwa", "Nazwa posiadłości", wymagana=True, domyslna=""),
+            Kolumna(
+                "opis_zakup",
+                "Opis sekcji zakupu",
+                wymagana=False,
+                domyslna="",
+                typ="wieloliniowy",
+            ),
+            Kolumna("cena_zakupu", "Cena zakupu", wymagana=True, domyslna="0"),
+            Kolumna(
+                "postoj_niezabudowany",
+                "Opłata – teren niezabudowany",
+                wymagana=False,
+                domyslna="0",
+            ),
+            Kolumna(
+                "postoj_osada", "Opłata – z radą osady", wymagana=False, domyslna="0"
+            ),
+            Kolumna(
+                "postoj_miasto", "Opłata – z radą miasta", wymagana=False, domyslna="0"
+            ),
+            Kolumna(
+                "postoj_ratusz", "Opłata – z ratuszem", wymagana=False, domyslna="0"
+            ),
+            Kolumna(
+                "postoj_kapitol", "Opłata – z kapitolem", wymagana=False, domyslna="0"
+            ),
+            Kolumna(
+                "stopka",
+                "Stopka (linie sep. |)",
+                wymagana=False,
+                domyslna="",
+                typ="wieloliniowy",
+            ),
+            Kolumna(
+                "kolor_hex",
+                "Kolor wypełnienia (#hex)",
+                wymagana=False,
+                domyslna="#2E7D32",
+                typ="hex",
+            ),
+            Kolumna(
+                "plik_tlo",
+                "Ścieżka: tekstura tła",
+                wymagana=False,
+                domyslna="",
+                typ="sciezka",
+            ),
+            Kolumna(
+                "plik_ramka",
+                "Ścieżka: ramka",
+                wymagana=False,
+                domyslna="",
+                typ="sciezka",
+            ),
+            Kolumna(
+                "plik_ramka_mini",
+                "Ścieżka: ramka mała",
+                wymagana=False,
+                domyslna="",
+                typ="sciezka",
+            ),
+            Kolumna(
+                "plik_gold",
+                "Ścieżka: obrazek złoty",
+                wymagana=False,
+                domyslna="",
+                typ="sciezka",
+            ),
+        ]
+
+    def przykladowe_dane(self) -> list[dict]:
+        return [
+            {
+                "tytul": "AKT WŁASNOŚCI",
+                "nazwa": "DOLERE",
+                "opis_zakup": "",
+                "cena_zakupu": "120",
+                "postoj_niezabudowany": "10",
+                "postoj_osada": "40",
+                "postoj_miasto": "120",
+                "postoj_ratusz": "360",
+                "postoj_kapitol": "640",
+                "stopka": "jeżeli gracz posiada wszystkie miasta|w tej krainie i są one niezabudowane|to opłata jest podwójna",
+                "kolor_hex": "#2E7D32",
+                "plik_tlo": "",
+                "plik_ramka": "",
+                "plik_ramka_mini": "",
+                "plik_gold": "",
+            },
+            {
+                "tytul": "AKT WŁASNOŚCI",
+                "nazwa": "TIRITH",
+                "opis_zakup": "",
+                "cena_zakupu": "600",
+                "postoj_niezabudowany": "55",
+                "postoj_osada": "260",
+                "postoj_miasto": "780",
+                "postoj_ratusz": "1900",
+                "postoj_kapitol": "2200",
+                "stopka": "jeżeli gracz posiada wszystkie miasta|w tej krainie i są one niezabudowane|to opłata jest podwójna",
+                "kolor_hex": "#1A237E",
+                "plik_tlo": "",
+                "plik_ramka": "",
+                "plik_ramka_mini": "",
+                "plik_gold": "",
+            },
+        ]
+
+
 # ---------------------------------------------------------------------------
 # Pomocnicze
 # ---------------------------------------------------------------------------
