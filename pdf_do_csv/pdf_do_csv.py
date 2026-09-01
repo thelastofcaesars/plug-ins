@@ -187,7 +187,25 @@ def parsuj_karte_hipoteczna(tekst: str, tytul: str) -> list[str]:
 
 
 def parsuj_akt_wlasnosci(tekst: str, tytul: str) -> list[str]:
-    opis_zakup = "Cena zakupu\nOpłata za  postój:"
+    opis_zakup = "Cena zakupu\n" "Opłata za  postój:\n"
+    opis_zakup_1 = opis_zakup + (
+        "- teren niezabudowany\n"
+        "- teren z radą osady\n"
+        "- teren z radą miasta\n"
+        "- teren z ratuszem\n"
+        "- teren z kapitolem"
+    )
+    opis_zakup_2 = opis_zakup + (
+        "- 1 przejście\n"
+        "- 2 przejścia\n"
+        "- 3 przejścia\n"
+        "- 4 przejścia\n"
+        "- 5 przejść"
+    )
+    opis_zakup_3 = opis_zakup + (
+        "ilość wyrzuconych oczek *\n" "- 1 kopalnia\n" "- 2 kopalnie\n" "- 3 kopalnie"
+    )
+
     stopka = (
         "jeśli gracz posiada wszystkie miasta\n"
         "w tej krainie i są one niezabudowane\n"
@@ -197,49 +215,91 @@ def parsuj_akt_wlasnosci(tekst: str, tytul: str) -> list[str]:
     linie = [
         l
         for l in linie
-        if not re.fullmatch(r"akt(\s+w[łl]asno[śs]ci)?", l, re.IGNORECASE)
+        if not re.fullmatch(
+            r"akt(\s+w[łl]asno[śs]ci)?|akt\s+w[eę]asno[śs]ci", l, re.IGNORECASE
+        )
     ]
-    print(linie)
 
-    # nazwa = pierwsza linia niebędąca etykietą ani liczbą
-    etykiety = r"cena|zakupu|op[łl]ata|posto[jj]|teren|rad[aą]|ratusz|kapitol|gracz|krainie|niezabudowany"
+    def wyciagnij(linia: str) -> str:
+        m = re.search(r"(\d+)", linia)
+        return m.group(1) if m else ""
+
+    def jest_samotna_liczba(linia: str) -> bool:
+        # linia zawiera cyfry ale żadnego ciągu liter >= 3 (szum OCR jak %, *, ' jest OK)
+        return bool(re.search(r"\d", linia)) and not bool(
+            re.search(r"[a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ]{3,}", linia)
+        )
+
+    # nazwa = pierwsza linia z >= 2 wielkimi literami, nie będąca etykietą
+    etykiety = r"cena|zakupu|op[łl]ata|posto[jj]|teren|rad[aą]|ratusz|kapitol|gracz|krainie|niezabudowany|przejś|przejsc|kopaln|oczek"
     nazwa = ""
     for linia in linie:
-        if not re.search(etykiety, linia, re.IGNORECASE) and not re.match(
-            r"^[-•]", linia
+        stripped = re.sub(r"^[^a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+", "", linia).strip()
+        if (
+            len(stripped) > 2
+            and re.search(r"[A-ZĄĆĘŁŃÓŚŹŻ]{2,}", stripped)
+            and not re.search(etykiety, stripped, re.IGNORECASE)
+            and not jest_samotna_liczba(stripped)
         ):
-            nazwa = linia
+            nazwa = stripped
             break
 
-    # zbierz linie zawierające samotną liczbę (z ewentualnym szumem OCR)
-    def liczby_standalone() -> list[str]:
-        wynik = []
-        for linia in linie:
-            if re.search(r"\d", linia) and not re.search(
-                r"[a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ]{3,}", linia
-            ):
-                m = re.search(r"(\d+)", linia)
-                if m:
-                    wynik.append(m.group(1))
-        return wynik
+    # Pola do wyciągnięcia i ich wzorce etykiet
+    POLA = [
+        ("cena", r"cena\s+zakupu"),
+        ("niezabud", r"niezabudowany|1\s+kopaln|1\s+przejś"),
+        ("osada", r"rad[aą]\s+osady|2\s+kopaln|2\s+przejś"),
+        ("miasto", r"rad[aą]\s+miasta|3\s+kopaln|3\s+przejś"),
+        ("ratusz", r"ratuszem|4\s+przejś"),
+        ("kapitol", r"kapitolem|5\s+przejś"),
+    ]
+    is_kopalnia = False
+    is_przejscie = False
+    opis = opis_zakup_1
+    # Przebieg 1: znajdź linie etykiet i sprawdź czy mają inline liczbę
+    label_idxs: set[int] = set()
+    wyniki: dict[str, str | None] = {}
+    for key, wzorzec in POLA:
+        for i, linia in enumerate(linie):
+            if re.search(wzorzec, linia, re.IGNORECASE):
+                label_idxs.add(i)
+                v = wyciagnij(linia)
+                wyniki[key] = v or None  # None = potrzebuje standalone
+                if "kopaln" in linia:
+                    is_kopalnia = True
+                    opis = opis_zakup_3
+                elif "przejś" in linia:
+                    is_przejscie = True
+                    opis = opis_zakup_2
+                break
+        else:
+            wyniki[key] = None
 
-    nums = liczby_standalone()
+    # Przebieg 2: zbierz linie ze standalone liczbami (poza liniami etykiet)
+    standalone = [
+        wyciagnij(l)
+        for i, l in enumerate(linie)
+        if i not in label_idxs and jest_samotna_liczba(l) and wyciagnij(l)
+    ]
+    stan = iter(standalone)
 
-    def n(i):
-        return nums[i] if i < len(nums) else ""
+    # Przypisz standalone do pól bez inline wartości
+    for key, _ in POLA:
+        if wyniki[key] is None:
+            wyniki[key] = next(stan, "")
 
     return [
         tytul,
         nazwa,
-        opis_zakup,
-        n(0),  # nr karty
-        n(0),  # cena_zakupu
-        n(1),  # postoj_niezabudowany
-        n(2),  # postoj_osada
-        n(3),  # postoj_miasto
-        n(4),  # postoj_ratusz
-        n(5),  # postoj_kapitol
-        stopka,
+        opis,
+        wyniki["cena"],
+        wyniki["niezabud"],
+        wyniki["osada"],
+        wyniki["miasto"],
+        wyniki["ratusz"],
+        wyniki["kapitol"],
+        stopka if not is_przejscie and not is_kopalnia else "",
+        "",
         "H:\\herobusiness\\bg.png",
         "H:\\herobusiness\\ramka.png",
         "H:\\herobusiness\\ramka_mini.png",
