@@ -120,9 +120,7 @@ KOLUMNY_KARTY = [
     "kolor_hex",
     "plik_tlo",
     "plik_ramka",
-    "plik_img1",
-    "plik_img2",
-    "plik_img3",
+    "plik_gold",
 ]
 
 KOLUMNY_AKTU = [
@@ -197,8 +195,6 @@ def parsuj_karte_hipoteczna(tekst: str, tytul: str) -> list[str]:
         "",
         "H:\\herobusiness\\bg.png",
         "H:\\herobusiness\\ramka.png",
-        "H:\\herobusiness\\gold.png",
-        "H:\\herobusiness\\gold.png",
         "H:\\herobusiness\\gold.png",
     ]
 

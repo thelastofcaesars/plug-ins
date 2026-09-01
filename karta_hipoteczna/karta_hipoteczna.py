@@ -119,26 +119,8 @@ class KartaHipoteczna(BaseGeneratorPlugin):
             rw,
         )
         procedure.add_file_argument(
-            "plik_img1",
-            "Obrazek gorny:",
-            "",
-            Gimp.FileChooserAction.OPEN,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_file_argument(
-            "plik_img2",
-            "Obrazek srodkowy:",
-            "",
-            Gimp.FileChooserAction.OPEN,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_file_argument(
-            "plik_img3",
-            "Obrazek dolny:",
+            "plik_gold",
+            "Obrazek gorny, środkowy i dolny:",
             "",
             Gimp.FileChooserAction.OPEN,
             True,
@@ -182,9 +164,7 @@ class KartaHipoteczna(BaseGeneratorPlugin):
                 "kolor_hex": hex_kolor,
                 "plik_tlo": gf("plik_tlo"),
                 "plik_ramka": gf("plik_ramka"),
-                "plik_img1": gf("plik_img1"),
-                "plik_img2": gf("plik_img2"),
-                "plik_img3": gf("plik_img3"),
+                "plik_gold": gf("plik_gold"),
             }
         )
         return dane
@@ -243,9 +223,9 @@ class KartaHipoteczna(BaseGeneratorPlugin):
 
     def _krok_obrazki(self, obraz, dane, config, bleed, W, H):
         pozycje = [
-            ("plik_img1", "Obrazek gorny", int(W * 0.54), int(H * 0.46)),
-            ("plik_img2", "Obrazek srodkowy", int(W * 0.85), int(H * 0.72)),
-            ("plik_img3", "Obrazek dolny", int(W * 0.85), int(H * 0.78)),
+            ("plik_gold", "Obrazek gorny", int(W * 0.54), int(H * 0.46)),
+            ("plik_gold", "Obrazek srodkowy", int(W * 0.85), int(H * 0.72)),
+            ("plik_gold", "Obrazek dolny", int(W * 0.85), int(H * 0.78)),
         ]
         for prop, nazwa, x, y in pozycje:
             sciezka = self.sciezka_grafiki(dane, prop, config)

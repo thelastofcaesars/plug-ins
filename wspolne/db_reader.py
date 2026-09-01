@@ -152,22 +152,8 @@ class SchemaKartaHipoteczna(BazaSchema):
                 typ="sciezka",
             ),
             Kolumna(
-                "plik_img1",
-                "Ścieżka: obrazek górny",
-                wymagana=False,
-                domyslna="",
-                typ="sciezka",
-            ),
-            Kolumna(
-                "plik_img2",
-                "Ścieżka: obrazek środk.",
-                wymagana=False,
-                domyslna="",
-                typ="sciezka",
-            ),
-            Kolumna(
-                "plik_img3",
-                "Ścieżka: obrazek dolny",
+                "plik_gold",
+                "Ścieżka: obrazek górny, środkowy i dolny",
                 wymagana=False,
                 domyslna="",
                 typ="sciezka",
@@ -189,9 +175,7 @@ class SchemaKartaHipoteczna(BazaSchema):
                 "kolor_hex": "#5C3317",
                 "plik_tlo": "",
                 "plik_ramka": "",
-                "plik_img1": "",
-                "plik_img2": "",
-                "plik_img3": "",
+                "plik_gold": "",
             },
             {
                 "tytul": "KARTA HIPOTECZNA",
@@ -206,9 +190,7 @@ class SchemaKartaHipoteczna(BazaSchema):
                 "kolor_hex": "#2E4A6B",
                 "plik_tlo": "",
                 "plik_ramka": "",
-                "plik_img1": "",
-                "plik_img2": "",
-                "plik_img3": "",
+                "plik_gold": "",
             },
         ]
 
