@@ -234,7 +234,7 @@ class KartaHipoteczna(BaseGeneratorPlugin):
         sciezka_gold = self.sciezka_grafiki(dane, "plik_gold", config)
         if sciezka_gold:
             for nazwa_warstwy in sorted(szablon):
-                if nazwa_warstwy.startswith("gold_"):
+                if nazwa_warstwy.startswith("gold_") and dane.get("koszt1_wartosc", ""):
                     warstwa = szablon[nazwa_warstwy]
                     x = int(round(W * warstwa["x_rel"]))
                     y = int(round(H * warstwa["y_rel"]))
@@ -273,7 +273,9 @@ class KartaHipoteczna(BaseGeneratorPlugin):
     def _krok_teksty(self, obraz, dane, bleed, W, H):
         szablony = self._zaladuj_szablon(JSON_SZABLON)
 
-        self.tekst_z_szablonu(obraz, szablony, "typ_karty", dane.get("tytul", ""), W, H)
+        self.tekst_z_szablonu(
+            obraz, szablony, "typ_karty", dane.get("tytul", "").replace(" ", "\n"), W, H
+        )
         town = dane.get("nazwa", "").replace(" ", "\n")
         self.tekst_z_szablonu(obraz, szablony, "nazwa_miasta", town, W, H)
         self.tekst_z_szablonu(
@@ -286,9 +288,11 @@ class KartaHipoteczna(BaseGeneratorPlugin):
         opis = dane.get("opis", "").replace("|", "\n")
         self.tekst_z_szablonu(obraz, szablony, "opis_1", opis, W, H)
         opis = f"{dane.get("koszt1_nazwa", "")}\n{dane.get("koszt2_nazwa", "")}"
-        self.tekst_z_szablonu(obraz, szablony, "opis_rozbudowa", opis, W, H)
+        if opis.strip("\n"):
+            self.tekst_z_szablonu(obraz, szablony, "opis_rozbudowa", opis, W, H)
         koszt = f"{dane.get("koszt1_wartosc", "")}\n{dane.get("koszt2_wartosc", "")}"
-        self.tekst_z_szablonu(obraz, szablony, "ceny_rozbudowa", koszt, W, H)
+        if koszt.strip("\n"):
+            self.tekst_z_szablonu(obraz, szablony, "ceny_rozbudowa", koszt, W, H)
 
         stopka = "\n".join(l.strip() for l in (dane.get("stopka") or "").split("|"))
         self.tekst_z_szablonu(obraz, szablony, "stopka", stopka, W, H)
