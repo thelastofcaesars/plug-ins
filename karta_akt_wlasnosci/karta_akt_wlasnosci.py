@@ -25,33 +25,13 @@ BLEED_MM = 3
 KARTA_W_MM = 50
 KARTA_H_MM = 90
 
-# Współrzędne z awers.json: x_rel/y_rel/ułamek obrazu dla 591x1063 px
+# Współrzędne z awers.json: x_rel/y_rel dla warstw graficznych
 _REL = {
-    "bg": (0.0, 0.0, 1.0, 1.0),
     "ramka_color": (0.04061, 0.02258, 0.91878, 0.95484),
     "ramka_mini": (0.18274, 0.20226, 0.63283, 0.29445),
-    "typ_karty_y": 0.08655,
-    "nazwa_y": 0.10536,
-    "opis_x": 0.15905,
-    "ceny_x": 0.64805,
-    "gold_x": 0.79188,
-    "y_zakup": 0.54092,
-    "y_niezabudowany": 0.61618,
-    "y_osada": 0.65475,
-    "y_miasto": 0.69238,
-    "y_ratusz": 0.73001,
-    "y_kapitol": 0.76952,
-    "stopka_y": 0.8175,
 }
 
-_KOSZTY = [
-    ("Cena zakupu", "cena_zakupu", "y_zakup"),
-    ("teren niezabudowany", "postoj_niezabudowany", "y_niezabudowany"),
-    ("z rada osady", "postoj_osada", "y_osada"),
-    ("z rada miasta", "postoj_miasto", "y_miasto"),
-    ("z ratuszem", "postoj_ratusz", "y_ratusz"),
-    ("z kapitolem", "postoj_kapitol", "y_kapitol"),
-]
+JSON_SZABLON = os.path.join(os.path.dirname(os.path.dirname(__file__)), "awers.json")
 
 
 class KartaAktWlasnosci(BaseGeneratorPlugin):
@@ -172,22 +152,12 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
         )
         return dane
 
-    def _rel_xy(self, W, H, x_rel, y_rel):
-        return int(round(W * x_rel)), int(round(H * y_rel))
-
-    def _rel_box(self, W, H, x_rel, y_rel, w_rel, h_rel):
-        x = int(round(W * x_rel))
-        y = int(round(H * y_rel))
-        w = int(round(W * w_rel))
-        h = int(round(H * h_rel))
-        return x, y, w, h
-
     def generuj(self, obraz: Gimp.Image, dane: dict, config) -> None:
         W = obraz.get_width()
         H = obraz.get_height()
 
+        # self._krok_wypelnienie(obraz, dane, config, W, H)
         self._krok_tlo(obraz, dane, config, W, H)
-        self._krok_wypelnienie(obraz, dane, config, W, H)
         self._krok_ramka(obraz, dane, config, W, H)
         self._krok_obrazki(obraz, dane, config, W, H)
         self._krok_teksty(obraz, dane, W, H)
@@ -200,6 +170,7 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
             self.warstwa_kolor(obraz, "Tlo kolor", 0, 0, W, H, Gegl.Color.new("black"))
 
     def _krok_wypelnienie(self, obraz, dane, config, W, H):
+        sciezka = self.sciezka_grafiki(dane, "plik_ramka_color", config)
         x, y, w, h = self._rel_box(*((W, H) + _REL["ramka_color"]))
         hex_k = dane.get("kolor_hex", "").strip()
         if hex_k:
@@ -211,7 +182,9 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
                 kolor = Gegl.Color.new("darkgreen")
         else:
             kolor = Gegl.Color.new("darkgreen")
-
+        if sciezka:
+            self.warstwa_z_pliku(obraz, sciezka, "Ramka color", x, y, w, h, kolor)
+            return
         self.warstwa_kolor(obraz, "Wypelnienie ramki", x, y, w, h, kolor)
 
     def _krok_ramka(self, obraz, dane, config, W, H):
@@ -220,54 +193,42 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
             self.warstwa_z_pliku(obraz, sciezka, "Ramka", 0, 0, W, H)
 
     def _krok_obrazki(self, obraz, dane, config, W, H):
-        mini_x, mini_y, mini_w, mini_h = self._rel_box(W, H, *_REL["ramka_mini"])
-
-        sciezka_mini = self.sciezka_grafiki(dane, "plik_ramka_mini", config)
-        if sciezka_mini:
-            self.warstwa_z_pliku(
-                obraz, sciezka_mini, "Ramka mini", mini_x, mini_y, mini_w, mini_h
-            )
+        szablon = self._zaladuj_szablon(JSON_SZABLON)
+        for nazwa_warstwy in ("mini_tlo", "ramka_mini_color", "ramka_mini", "obiekt"):
+            warstwa = szablon.get(nazwa_warstwy)
+            if not warstwa:
+                continue
+            x = int(round(W * warstwa["x_rel"]))
+            y = int(round(H * warstwa["y_rel"]))
+            w = int(round(W * warstwa["w_rel"]))
+            h = int(round(H * warstwa["h_rel"]))
+            sciezka = self.sciezka_grafiki(dane, f"plik_{nazwa_warstwy}", config)
+            if sciezka:
+                self.warstwa_z_pliku(obraz, sciezka, nazwa_warstwy, x, y, w, h)
 
         sciezka_gold = self.sciezka_grafiki(dane, "plik_gold", config)
         if sciezka_gold:
-            pozycje = [
-                ("gold_zakup", 0.79188, 0.54092),
-                ("gold_niezabudowany", 0.79188, 0.61618),
-                ("gold_rada_osady", 0.79188, 0.65475),
-                ("gold_rada_miasta", 0.79188, 0.69238),
-                ("gold_ratusz", 0.79188, 0.73001),
-                ("gold_kapitol", 0.79188, 0.76952),
-            ]
-            for nazwa, x_rel, y_rel in pozycje:
-                x, y = self._rel_xy(W, H, x_rel, y_rel)
-                self.warstwa_z_pliku(obraz, sciezka_gold, nazwa, x, y)
+            for nazwa_warstwy in sorted(szablon):
+                if nazwa_warstwy.startswith("gold_"):
+                    warstwa = szablon[nazwa_warstwy]
+                    x = int(round(W * warstwa["x_rel"]))
+                    y = int(round(H * warstwa["y_rel"]))
+                    w = int(round(W * warstwa["w_rel"]))
+                    h = int(round(H * warstwa["h_rel"]))
+                    self.warstwa_z_pliku(obraz, sciezka_gold, nazwa_warstwy, x, y, w, h)
 
     def _krok_teksty(self, obraz, dane, W, H):
-        bialy = Gegl.Color.new("white")
-
-        # nagłówek i nazwa posiadłości
-        tytul = (dane.get("tytul") or "AKT WŁASNOŚCI").upper()
-        self.tekst(
-            obraz,
-            tytul,
-            int(W * 0.5),
-            int(H * _REL["typ_karty_y"]),
-            19,
-            bialy,
+        szablony = self._zaladuj_szablon(JSON_SZABLON)
+        card = (dane.get("tytul") or "AKT WŁASNOŚCI").upper()
+        self.tekst_z_szablonu(obraz, szablony, "typ_karty", card, W, H)
+        town = dane.get("nazwa", "").replace(" ", "\n")
+        self.tekst_z_szablonu(obraz, szablony, "nazwa_miasta", town, W, H)
+        self.tekst_z_szablonu(
+            obraz, szablony, "nr_karty_1", dane.get("pozycja_karty", ""), W, H
         )
-        self.tekst(
-            obraz,
-            dane.get("nazwa", ""),
-            int(W * 0.5),
-            int(H * _REL["nazwa_y"]),
-            42,
-            bialy,
+        self.tekst_z_szablonu(
+            obraz, szablony, "nr_karty_2", dane.get("pozycja_karty", ""), W, H
         )
-
-        opis_x = int(W * _REL["opis_x"])
-        ceny_x = int(W * _REL["ceny_x"])
-        y_blok = int(H * _REL["y_zakup"])
-
         opis = (dane.get("opis_zakup") or "").strip()
         if not opis:
             opis = (
@@ -279,10 +240,11 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
                 "- teren z ratuszem\n"
                 "- teren z kapitolem"
             )
+        self.tekst_z_szablonu(obraz, szablony, "opis_zakup", opis, W, H)
 
+        # GIMP JSON: "280\n\n20\n100\n300\n500\n2500"
         ceny = "\n".join(
-            part
-            for part in [
+            [
                 dane.get("cena_zakupu") or "",
                 "",
                 dane.get("postoj_niezabudowany", ""),
@@ -291,22 +253,11 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
                 dane.get("postoj_ratusz", ""),
                 dane.get("postoj_kapitol", ""),
             ]
-            if part
         )
+        self.tekst_z_szablonu(obraz, szablony, "ceny_zakupu", ceny, W, H)
 
-        self.tekst(obraz, opis, opis_x, y_blok, 27, bialy)
-        self.tekst(obraz, ceny, ceny_x, y_blok, 27, bialy)
-        stopka = ""
-        for i, linia in enumerate((dane.get("stopka") or "").split("|")):
-            stopka += linia.strip() + "\n"
-        self.tekst(
-            obraz,
-            stopka,
-            0,
-            int(H * _REL["stopka_y"]) + i * mm(4),
-            20,
-            bialy,
-        )
+        stopka = "\n".join(l.strip() for l in (dane.get("stopka") or "").split("|"))
+        self.tekst_z_szablonu(obraz, szablony, "stopka", stopka, W, H)
 
 
 if __name__ == "__main__":

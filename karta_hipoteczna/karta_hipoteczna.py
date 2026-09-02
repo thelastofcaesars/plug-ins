@@ -30,6 +30,16 @@ BLEED_MM = 3  # spady drukarskie (mm)
 KARTA_W_MM = 50  # szerokosc bez spadow
 KARTA_H_MM = 90  # wysokosc bez spadow
 
+JSON_SZABLON = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "karta_hipoteczna.json"
+)
+
+# Współrzędne z awers.json: x_rel/y_rel dla warstw graficznych
+_REL = {
+    "ramka_color": (0.04061, 0.02258, 0.91878, 0.95484),
+    "ramka_mini": (0.18274, 0.20226, 0.63283, 0.29445),
+}
+
 
 class KartaHipoteczna(BaseGeneratorPlugin):
     """Generator kart hipotecznych 5x9 cm z spadami."""
@@ -197,23 +207,21 @@ class KartaHipoteczna(BaseGeneratorPlugin):
             self.warstwa_kolor(obraz, "Tlo kolor", 0, 0, W, H, Gegl.Color.new("black"))
 
     def _krok_wypelnienie(self, obraz, dane, config, bleed, W, H):
-        margin = mm(6)
-        x = bleed + margin
-        y = bleed + margin
-        w = W - 2 * (bleed + margin)
-        h = H - 2 * (bleed + margin)
-
+        sciezka = self.sciezka_grafiki(dane, "plik_ramka_color", config)
+        x, y, w, h = self._rel_box(*((W, H) + _REL["ramka_color"]))
         hex_k = dane.get("kolor_hex", "").strip()
         if hex_k:
-            kolor = self.hex_na_kolor(hex_k, "saddlebrown")
+            kolor = self.hex_na_kolor(hex_k, "darkgreen")
         elif config:
             try:
                 kolor = config.get_property("kolor_wypelnienia")
             except Exception:
-                kolor = Gegl.Color.new("saddlebrown")
+                kolor = Gegl.Color.new("darkgreen")
         else:
-            kolor = Gegl.Color.new("saddlebrown")
-
+            kolor = Gegl.Color.new("darkgreen")
+        if sciezka:
+            self.warstwa_z_pliku(obraz, sciezka, "Ramka color", x, y, w, h, kolor)
+            return
         self.warstwa_kolor(obraz, "Wypelnienie ramki", x, y, w, h, kolor)
 
     def _krok_ramka(self, obraz, dane, config, W, H):
@@ -222,15 +230,34 @@ class KartaHipoteczna(BaseGeneratorPlugin):
             self.warstwa_z_pliku(obraz, sciezka, "Ramka", 0, 0, W, H)
 
     def _krok_obrazki(self, obraz, dane, config, bleed, W, H):
-        pozycje = [
-            ("plik_gold", "Obrazek gorny", int(W * 0.54), int(H * 0.46)),
-            ("plik_gold", "Obrazek srodkowy", int(W * 0.85), int(H * 0.72)),
-            ("plik_gold", "Obrazek dolny", int(W * 0.85), int(H * 0.78)),
-        ]
-        for prop, nazwa, x, y in pozycje:
-            sciezka = self.sciezka_grafiki(dane, prop, config)
+        szablon = self._zaladuj_szablon(JSON_SZABLON)
+        sciezka_gold = self.sciezka_grafiki(dane, "plik_gold", config)
+        if sciezka_gold:
+            for nazwa_warstwy in sorted(szablon):
+                if nazwa_warstwy.startswith("gold_"):
+                    warstwa = szablon[nazwa_warstwy]
+                    x = int(round(W * warstwa["x_rel"]))
+                    y = int(round(H * warstwa["y_rel"]))
+                    w = int(round(W * warstwa["w_rel"]))
+                    h = int(round(H * warstwa["h_rel"]))
+                    self.warstwa_z_pliku(obraz, sciezka_gold, nazwa_warstwy, x, y, w, h)
+
+        for nazwa_warstwy in (
+            "obiekt",
+            "ramka_mini_tlo",
+            "ramka_mini",
+            "ramka_mini_color",
+        ):
+            warstwa = szablon.get(nazwa_warstwy)
+            if not warstwa:
+                continue
+            x = int(round(W * warstwa["x_rel"]))
+            y = int(round(H * warstwa["y_rel"]))
+            w = int(round(W * warstwa["w_rel"]))
+            h = int(round(H * warstwa["h_rel"]))
+            sciezka = self.sciezka_grafiki(dane, f"plik_{nazwa_warstwy}", config)
             if sciezka:
-                self.warstwa_z_pliku(obraz, sciezka, nazwa, x, y)
+                self.warstwa_z_pliku(obraz, sciezka, nazwa_warstwy, x, y, w, h)
 
     def _krok_linie(self, obraz, bleed, W, H):
         margin = mm(8)
@@ -244,30 +271,27 @@ class KartaHipoteczna(BaseGeneratorPlugin):
             )
 
     def _krok_teksty(self, obraz, dane, bleed, W, H):
-        margin = mm(10)
-        x = bleed + margin
-        prawy_x = W - x - mm(15)
-        bialy = Gegl.Color.new("white")
+        szablony = self._zaladuj_szablon(JSON_SZABLON)
 
-        self.tekst(obraz, dane.get("tytul", ""), x, int(H * 0.03), 26, bialy)
-        self.tekst(obraz, dane.get("nazwa", ""), x, int(H * 0.27), 30, bialy)
-        self.tekst(obraz, "obciazenie hipoteczne", x, int(H * 0.535), 16, bialy)
-        self.tekst(obraz, dane.get("obciazenie", ""), x, int(H * 0.575), 20, bialy)
+        self.tekst_z_szablonu(obraz, szablony, "typ_karty", dane.get("tytul", ""), W, H)
+        town = dane.get("nazwa", "").replace(" ", "\n")
+        self.tekst_z_szablonu(obraz, szablony, "nazwa_miasta", town, W, H)
+        self.tekst_z_szablonu(
+            obraz, szablony, "obciążenie hipoteczne", "obciążenie hipoteczne", W, H
+        )
+        self.tekst_z_szablonu(
+            obraz, szablony, "hipoteka_cena", dane.get("obciazenie", ""), W, H
+        )
 
-        for i, linia in enumerate(dane.get("opis", "").split("|")):
-            self.tekst(obraz, linia.strip(), x, int(H * 0.625) + i * mm(5), 15, bialy)
+        opis = dane.get("opis", "").replace("|", "\n")
+        self.tekst_z_szablonu(obraz, szablony, "opis_1", opis, W, H)
+        opis = f"{dane.get("koszt1_nazwa", "")}\n{dane.get("koszt2_nazwa", "")}"
+        self.tekst_z_szablonu(obraz, szablony, "opis_rozbudowa", opis, W, H)
+        koszt = f"{dane.get("koszt1_wartosc", "")}\n{dane.get("koszt2_wartosc", "")}"
+        self.tekst_z_szablonu(obraz, szablony, "ceny_rozbudowa", koszt, W, H)
 
-        k1n = dane.get("koszt1_nazwa", "")
-        k1w = dane.get("koszt1_wartosc", "")
-        k2n = dane.get("koszt2_nazwa", "")
-        k2w = dane.get("koszt2_wartosc", "")
-        self.tekst(obraz, k1n, x, int(H * 0.755), 17, bialy)
-        self.tekst(obraz, k1w, prawy_x, int(H * 0.755), 17, bialy)
-        self.tekst(obraz, k2n, x, int(H * 0.795), 17, bialy)
-        self.tekst(obraz, k2w, prawy_x, int(H * 0.795), 17, bialy)
-
-        for i, linia in enumerate(dane.get("stopka", "").split("|")):
-            self.tekst(obraz, linia.strip(), x, int(H * 0.855) + i * mm(4), 13, bialy)
+        stopka = "\n".join(l.strip() for l in (dane.get("stopka") or "").split("|"))
+        self.tekst_z_szablonu(obraz, szablony, "stopka", stopka, W, H)
 
 
 if __name__ == "__main__":

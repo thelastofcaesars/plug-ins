@@ -291,6 +291,16 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
     # Wewnętrzne – nie nadpisuj                                           #
     # ------------------------------------------------------------------ #
 
+    def _rel_xy(self, W, H, x_rel, y_rel):
+        return int(round(W * x_rel)), int(round(H * y_rel))
+
+    def _rel_box(self, W, H, x_rel, y_rel, w_rel, h_rel):
+        x = int(round(W * x_rel))
+        y = int(round(H * y_rel))
+        w = int(round(W * w_rel))
+        h = int(round(H * h_rel))
+        return x, y, w, h
+
     def _generuj_i_zapisz(self, dane: dict, config, katalog: str, numer=None):
         # Oblicz wymiary: najpierw z danych (DB), potem z config, potem domyłowo z klasy
         szer_px, wys_px = self._get_dimensions(dane, config)
@@ -396,8 +406,9 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         y: int,
         w: int | None = None,
         h: int | None = None,
+        kolor=None,
     ) -> Gimp.Layer:
-        """Ładuje plik graficzny i wstawia jako warstwę. Zwraca None jeśli brak pliku."""
+        """Ładuje plik jako warstwę, opcjonalnie barwiąc go filtrem Colorize."""
         if not sciezka or not os.path.isfile(sciezka):
             return None
         img_tmp = Gimp.file_load(
@@ -411,6 +422,19 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         if w and h:
             warstwa.scale(w, h, False)
         warstwa.set_offsets(x, y)
+        if kolor:
+            try:
+                hue, saturation, lightness = kolor.get_hsv()
+                filtr = Gimp.DrawableFilter.new(
+                    warstwa, "Barwienie", "gegl:colorize", None
+                )
+                ustawienia = filtr.get_config()
+                ustawienia.set_property("hue", hue)
+                ustawienia.set_property("saturation", saturation)
+                ustawienia.set_property("lightness", lightness)
+                filtr.commit()
+            except Exception:
+                pass
         return warstwa
 
     def _get_dimensions(self, dane: dict, config) -> tuple[int, int]:
@@ -476,13 +500,114 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         return ""
 
     def tekst(
-        self, obraz, tresc: str, x: int, y: int, rozmiar_px: int, kolor=None
+        self,
+        obraz,
+        tresc: str,
+        x: int,
+        y: int,
+        rozmiar_px: int = 16,
+        kolor=None,
+        wyrownanie: str | int = "LEFT",
+        czcionka: str | None = None,
+        odstep_liniowy: float = 0.0,
+        odstep_liter: float = 0.0,
     ) -> Gimp.Layer:
-        """Dodaje warstwę tekstową. kolor – Gegl.Color lub None (bieżący)."""
+        """Dodaje warstwę tekstową z obsługą wyrównania, rozmiaru i odstępów.
+
+        Parametry:
+            tresc – treść tekstu
+            x, y – punkt kotwiczenia tekstu
+            rozmiar_px – rozmiar czcionki w pikselach
+            kolor – kolor tekstu (Gegl.Color)
+            wyrownanie – LEFT/CENTER/RIGHT albo 0/1/2
+            czcionka – nazwa czcionki, np. "Times New Roman Normalny"
+            odstep_liniowy, odstep_liter – odstępy tekstu
+        """
+        if not tresc:
+            return None
+
         if kolor:
             Gimp.context_set_foreground(kolor)
+
+        if czcionka:
+            try:
+                Gimp.context_set_font(czcionka)
+            except Exception:
+                pass
+
         font = Gimp.context_get_font()
-        return Gimp.text_font(obraz, None, x, y, tresc, 0, True, rozmiar_px, font)
+        warstwa = Gimp.text_font(obraz, None, x, y, tresc, 0, True, rozmiar_px, font)
+
+        if warstwa is None:
+            return None
+
+        # Ujednolicone mapowanie wyrównania zgodne z JSON / GIMP
+        if isinstance(wyrownanie, str):
+            wyrownanie = wyrownanie.strip().upper()
+            mapa = {
+                "LEFT": Gimp.TextJustification.LEFT,
+                "CENTER": Gimp.TextJustification.CENTER,
+                "RIGHT": Gimp.TextJustification.RIGHT,
+                # GIMP enum: 0=LEFT, 1=RIGHT, 2=CENTER
+                "0": Gimp.TextJustification.LEFT,
+                "1": Gimp.TextJustification.RIGHT,
+                "2": Gimp.TextJustification.CENTER,
+            }
+            just = mapa.get(wyrownanie, Gimp.TextJustification.LEFT)
+        else:
+            try:
+                just = {
+                    0: Gimp.TextJustification.LEFT,
+                    1: Gimp.TextJustification.RIGHT,
+                    2: Gimp.TextJustification.CENTER,
+                }[int(wyrownanie)]
+            except Exception:
+                just = Gimp.TextJustification.LEFT
+
+        try:
+            warstwa.set_justification(just)
+        except Exception:
+            pass
+
+        if hasattr(warstwa, "set_font_size"):
+            try:
+                warstwa.set_font_size(rozmiar_px)
+            except Exception:
+                pass
+
+        if hasattr(warstwa, "set_font") and czcionka:
+            try:
+                warstwa.set_font(czcionka)
+            except Exception:
+                pass
+
+        if hasattr(warstwa, "set_line_spacing"):
+            try:
+                warstwa.set_line_spacing(float(odstep_liniowy))
+            except Exception:
+                pass
+
+        if hasattr(warstwa, "set_letter_spacing"):
+            try:
+                warstwa.set_letter_spacing(float(odstep_liter))
+            except Exception:
+                pass
+
+        # Jeśli mamy wyrównanie centrum/prawo, poprawiamy pozycję bazową tak,
+        # aby tekst nie „wyjeżdżał” z punktu odwołania. Oryginalny x/y jest
+        # traktowany jako punkt kotwiczenia lub środek pola tekstowego.
+        try:
+            szer = warstwa.get_width()
+            if just == Gimp.TextJustification.CENTER:
+                warstwa.set_offsets(int(round(x - szer / 2)), int(y))
+            elif just == Gimp.TextJustification.RIGHT:
+                warstwa.set_offsets(int(round(x - szer)), int(y))
+            else:
+                warstwa.set_offsets(int(x), int(y))
+        except Exception:
+            pass
+
+        return warstwa
 
     def hex_na_kolor(self, hex_str: str, domyslna: str = "black") -> Gegl.Color:
         """Konwertuje '#RRGGBB' na Gegl.Color."""
@@ -493,3 +618,59 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         except Exception:
             pass
         return Gegl.Color.new(domyslna)
+
+    def _zaladuj_szablon(self, json_path: str) -> dict:
+        """Ładuje JSON szablonu i indeksuje warstwy po nazwie."""
+        import json
+
+        if not os.path.isfile(json_path):
+            return {}
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {w["nazwa"]: w for w in data.get("warstwy", [])}
+
+    def tekst_z_szablonu(
+        self,
+        obraz,
+        szablony: dict,
+        nazwa: str,
+        tresc: str,
+        W: int,
+        H: int,
+        kolor=None,
+    ):
+        """Rysuje tekst korzystając z pozycji i stylu zapisanego w szablonie JSON.
+
+        x_rel/y_rel = lewy górny narożnik pola tekstowego.
+        w_rel = szerokość pola; służy do obliczenia punktu kotwiczenia
+        zależnie od wyrównania (GIMP enum: 0=LEFT, 1=RIGHT, 2=CENTER).
+        """
+        w = szablony.get(nazwa)
+        if not w or not tresc:
+            return None
+        x_left = int(round(W * w["x_rel"]))
+        box_w = int(round(W * w.get("w_rel", 0)))
+        y = int(round(H * w["y_rel"]))
+        just_str = str(w.get("wyrownanie", "0"))
+        # anchor x: LEFT→x_left, RIGHT→x_left+box_w, CENTER→x_left+box_w/2
+        if just_str == "2":  # CENTER
+            x = x_left + box_w // 2
+        elif just_str == "1":  # RIGHT
+            x = x_left + box_w
+        else:  # LEFT
+            x = x_left
+        kolor_tekstu = kolor or (
+            self.hex_na_kolor(w["kolor_hex"]) if w.get("kolor_hex") else None
+        )
+        return self.tekst(
+            obraz,
+            tresc,
+            x,
+            y,
+            rozmiar_px=int(w.get("rozmiar_px", 16)),
+            kolor=kolor_tekstu,
+            wyrownanie=just_str,
+            czcionka=w.get("czcionka"),
+            odstep_liniowy=float(w.get("odstep_liniowy", 0.0)),
+            odstep_liter=float(w.get("odstep_liter", 0.0)),
+        )
