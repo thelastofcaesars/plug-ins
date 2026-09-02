@@ -30,6 +30,9 @@ from gi.repository import Gimp
 gi.require_version("GimpUi", "3.0")
 from gi.repository import GimpUi
 
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+
 gi.require_version("GObject", "2.0")
 from gi.repository import GObject
 
@@ -128,6 +131,24 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
             None,
             rw,
         )
+        procedure.add_int_argument(
+            "wiersz_od",
+            "Przetwarzaj wiersze od:",
+            "Numer pierwszego wiersza danych w bazie; 0 oznacza pierwszy wiersz.",
+            0,
+            1_000_000,
+            0,
+            rw,
+        )
+        procedure.add_int_argument(
+            "wiersz_do",
+            "Przetwarzaj wiersze do:",
+            "Numer ostatniego wiersza danych w bazie; 0 oznacza ostatni wiersz.",
+            0,
+            1_000_000,
+            0,
+            rw,
+        )
         procedure.add_boolean_argument(
             "generuj_przyklad",
             "Zapisz przykładowy CSV:",
@@ -174,9 +195,55 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
 
     def run(self, procedure, run_mode, image, drawables, config, run_data):
         GimpUi.init(self.PROCEDURE_NAME)
+        db = self._zaladuj_db_reader()
 
         dialog = GimpUi.ProcedureDialog.new(procedure, config, None)
         dialog.fill(None)
+
+        licznik_wierszy = Gtk.Label()
+        licznik_wierszy.set_xalign(0.0)
+        licznik_wierszy.set_margin_top(8)
+        try:
+            wybor_bazy = dialog.get_widget("plik_baza", GimpUi.FileChooser.__gtype__)
+            kontener_bazy = wybor_bazy.get_parent() if wybor_bazy else None
+        except Exception:
+            kontener_bazy = None
+        if isinstance(kontener_bazy, Gtk.Box):
+            kontener_bazy.pack_start(licznik_wierszy, False, False, 0)
+        else:
+            dialog.get_content_area().pack_start(licznik_wierszy, False, False, 0)
+
+        def odswiez_licznik_wierszy(*_):
+            gfile = config.get_property("plik_baza")
+            sciezka_bazy = gfile.get_path() if gfile else None
+            if not sciezka_bazy:
+                licznik_wierszy.set_text("Baza: nie wybrano pliku.")
+                return
+            try:
+                liczba_wierszy = len(db.czytaj_plik(sciezka_bazy, self.schema())[0])
+                wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
+                wiersz_do = int(config.get_property("wiersz_do") or liczba_wierszy)
+                pierwszy = min(wiersz_od, liczba_wierszy)
+                ostatni = min(wiersz_do, liczba_wierszy)
+                wybranych = max(0, ostatni - pierwszy + 1)
+                licznik_wierszy.set_text(
+                    f"Baza: {liczba_wierszy} wierszy | "
+                    f"do przetworzenia: {wybranych} (wiersze {wiersz_od}-{ostatni})"
+                )
+            except Exception as e:
+                licznik_wierszy.set_text(f"Nie można odczytać bazy: {e}")
+
+        def po_zmianie_ustawienia(_config, pspec):
+            if pspec.name.replace("-", "_") in {
+                "plik_baza",
+                "wiersz_od",
+                "wiersz_do",
+            }:
+                odswiez_licznik_wierszy()
+
+        config.connect("notify", po_zmianie_ustawienia)
+        odswiez_licznik_wierszy()
+        licznik_wierszy.show_all()
 
         if not dialog.run():
             dialog.destroy()
@@ -185,8 +252,6 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         dialog.destroy()
 
         try:
-            db = self._zaladuj_db_reader()
-
             katalog = self._pobierz_katalog(config)
 
             # Tryb: generuj przykładowy CSV
@@ -230,9 +295,25 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
                 wiersze, ostrzezenia = db.czytaj_plik(sciezka_baza, self.schema())
                 if ostrzezenia:
                     Gimp.message("Ostrzeżenia:\n" + "\n".join(ostrzezenia[:15]))
-                for i, dane in enumerate(wiersze, start=1):
-                    self._generuj_i_zapisz(dane, config, katalog, numer=i)
-                Gimp.message(f"Wygenerowano {len(wiersze)} grafik do:\n{katalog}")
+                wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
+                wiersz_do = int(config.get_property("wiersz_do") or len(wiersze))
+                if wiersz_do < wiersz_od:
+                    raise ValueError(
+                        "Numer końcowego wiersza nie może być mniejszy od początkowego."
+                    )
+
+                wybrane_wiersze = list(
+                    enumerate(wiersze[wiersz_od - 1 : wiersz_do], start=wiersz_od)
+                )
+                if not wybrane_wiersze:
+                    raise ValueError("Wybrany zakres nie zawiera żadnych wierszy bazy.")
+
+                for numer, dane in wybrane_wiersze:
+                    self._generuj_i_zapisz(dane, config, katalog, numer=numer)
+                Gimp.message(
+                    f"Wygenerowano {len(wybrane_wiersze)} grafik "
+                    f"(wiersze {wiersz_od}-{wybrane_wiersze[-1][0]}) do:\n{katalog}"
+                )
             else:
                 # Tryb pojedynczy – z formularza
                 dane = self.dane_z_config(config)
