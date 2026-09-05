@@ -1,7 +1,14 @@
 """
-base_plugin.py – bazowa klasa pluginu GIMP dla generatorów grafik z bazą danych.
+base_plugin.py – rdzeń logiki i plugin GIMP dla generatorów grafik z bazą danych.
 
-Każdy plugin dziedziczy po BaseGeneratorPlugin i implementuje:
+Dwie warstwy:
+    - GeneratorCore        – czysta logika (schema, generuj, rendering, zapis
+                             plików), bez zależności od Gimp.PlugIn/PDB. Można
+                             użyć bezpośrednio (np. z przyszłego "uberskryptu"
+                             wsadowego), bez rejestrowania żadnych argumentów.
+    - BaseGeneratorPlugin  – dokłada rejestrację procedury PDB i dialog GIMP.
+
+Każdy samodzielny plugin dziedziczy po BaseGeneratorPlugin i implementuje:
     - PROCEDURE_NAME   : str   – unikalny identyfikator procedury
     - MENU_LABEL       : str   – etykieta w menu GIMP
     - MENU_PATH        : str   – ścieżka menu (domyślnie <Image>/Filtry/GeneratorKart/)
@@ -58,343 +65,31 @@ def mm(val: float) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Klasa bazowa
+# Rdzeń logiki generatora – bez zależności od PDB/GIMP-dialogu
 # ---------------------------------------------------------------------------
 
 
-class BaseGeneratorPlugin(Gimp.PlugIn):
+class GeneratorCore:
     """
-    Bazowy plugin-generator grafik z obsługą bazy danych (Excel/CSV).
+    Czysta logika generatora: schemat danych, rendering, zapis plików.
+
+    Nie zależy od Gimp.PlugIn/PDB – może być używana bezpośrednio (np. przez
+    przyszły "uberskrypt" wsadowy), bez rejestrowania argumentów procedury.
 
     Podklasa MUSI nadpisać:
-        PROCEDURE_NAME, MENU_LABEL
         schema()
-        rejestruj_argumenty(procedure)
         generuj(obraz, dane, config)
 
     Podklasa MOŻE nadpisać:
-        MENU_PATH, OPIS_KROTKI, OPIS_DLUGI
         szerokosc_px, wysokosc_px
         slugify_klucz (nazwa kolumny używanej do nazwy pliku)
+        dane_z_config(config)
     """
 
-    # --- do nadpisania ---
-    PROCEDURE_NAME: str = "python-fu-base-generator"
-    MENU_LABEL: str = "Generator (base)"
-    MENU_PATH: str = "<Image>/Filtry/GeneratorKart/"
-    OPIS_KROTKI: str = "Generator grafik"
-    OPIS_DLUGI: str = "Generator grafik z obsługą bazy danych"
     slugify_klucz: str = "nazwa"  # kolumna używana do nazwy pliku wynikowego
 
     szerokosc_px: int = mm(50 + 6)  # 5cm + 2x3mm spady
     wysokosc_px: int = mm(90 + 6)  # 9cm + 2x3mm spady
-
-    # ------------------------------------------------------------------ #
-    # Rejestracja – nie nadpisuj, używaj rejestruj_argumenty()            #
-    # ------------------------------------------------------------------ #
-
-    def do_query_procedures(self):
-        return [self.PROCEDURE_NAME]
-
-    def do_create_procedure(self, name):
-        procedure = Gimp.ImageProcedure.new(
-            self, name, Gimp.PDBProcType.PLUGIN, self.run, None
-        )
-        procedure.set_image_types("*")
-        procedure.set_sensitivity_mask(
-            Gimp.ProcedureSensitivityMask.DRAWABLE
-            | Gimp.ProcedureSensitivityMask.NO_DRAWABLES
-            | Gimp.ProcedureSensitivityMask.NO_IMAGE
-        )
-        procedure.set_documentation(self.OPIS_KROTKI, self.OPIS_DLUGI, name)
-        procedure.set_menu_label(self.MENU_LABEL)
-        procedure.add_menu_path(self.MENU_PATH)
-
-        rw = GObject.ParamFlags.READWRITE
-
-        # Wspólne argumenty dla wszystkich pluginów
-        procedure.add_file_argument(
-            "katalog_zapis",
-            "Folder do zapisu:",
-            "Gdzie zapisać pliki wynikowe (PNG + XCF)",
-            Gimp.FileChooserAction.SELECT_FOLDER,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_file_argument(
-            "plik_baza",
-            "Plik bazy danych (opcjonalnie):",
-            "Excel (.xlsx) lub CSV. Jeśli wybrany – generuje wiele grafik wsadowo.",
-            Gimp.FileChooserAction.OPEN,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_string_argument(
-            "arkusz",
-            "Arkusz Excel:",
-            "Nazwa arkusza do odczytu. Wymagana, jeśli plik ma więcej niż 1 arkusz.",
-            "",
-            rw,
-        )
-        procedure.add_int_argument(
-            "wiersz_od",
-            "Przetwarzaj wiersze od:",
-            "Numer pierwszego wiersza danych w bazie; 0 oznacza pierwszy wiersz.",
-            0,
-            1_000_000,
-            0,
-            rw,
-        )
-        procedure.add_int_argument(
-            "wiersz_do",
-            "Przetwarzaj wiersze do:",
-            "Numer ostatniego wiersza danych w bazie; 0 oznacza ostatni wiersz.",
-            0,
-            1_000_000,
-            0,
-            rw,
-        )
-        procedure.add_boolean_argument(
-            "generuj_przyklad",
-            "Zapisz przykładowy CSV:",
-            "Zapisuje przykładowy plik CSV do folderu zapisu i kończy działanie",
-            False,
-            rw,
-        )
-        procedure.add_boolean_argument(
-            "zapisz_do_bazy",
-            "Zapisz ustawienia do bazy (nie generuj):",
-            "Dopisuje bieżące ustawienia formularza jako nowy wiersz do CSV zamiast generować grafikę",
-            False,
-            rw,
-        )
-
-        # Opcjonalne wymiary (mm) — pozwalają nadpisać wymiar obrazu z dialogu
-        procedure.add_int_argument(
-            "szerokosc_mm",
-            "Szerokość karty (mm):",
-            "Szerokość karty w milimetrach (bez spadów)",
-            10,
-            500,
-            50,
-            rw,
-        )
-        procedure.add_int_argument(
-            "wysokosc_mm",
-            "Wysokość karty (mm):",
-            "Wysokość karty w milimetrach (bez spadów)",
-            10,
-            1000,
-            90,
-            rw,
-        )
-
-        # Argumenty specyficzne dla danego pluginu
-        self.rejestruj_argumenty(procedure)
-
-        return procedure
-
-    # ------------------------------------------------------------------ #
-    # Run – logika wspólna                                                 #
-    # ------------------------------------------------------------------ #
-
-    def run(self, procedure, run_mode, image, drawables, config, run_data):
-        GimpUi.init(self.PROCEDURE_NAME)
-        db = self._zaladuj_db_reader()
-
-        dialog = GimpUi.ProcedureDialog.new(procedure, config, None)
-        dialog.fill(None)
-
-        licznik_wierszy = Gtk.Label()
-        licznik_wierszy.set_xalign(0.0)
-        licznik_wierszy.set_margin_top(8)
-        try:
-            wybor_bazy = dialog.get_widget("plik_baza", GimpUi.FileChooser.__gtype__)
-            kontener_bazy = wybor_bazy.get_parent() if wybor_bazy else None
-        except Exception:
-            kontener_bazy = None
-        if isinstance(kontener_bazy, Gtk.Box):
-            kontener_bazy.pack_start(licznik_wierszy, False, False, 0)
-        else:
-            dialog.get_content_area().pack_start(licznik_wierszy, False, False, 0)
-
-        # Combo do wyboru arkusza – zastępuje domyślne pole tekstowe "arkusz",
-        # widoczne tylko gdy plik ma więcej niż 1 arkusz. Umieszczany zaraz
-        # pod licznikiem wierszy, w tym samym kontenerze co wybór bazy danych.
-        wybor_arkusza = Gtk.ComboBoxText()
-        wybor_arkusza.set_margin_top(4)
-        try:
-            pole_arkusz = dialog.get_widget("arkusz", Gtk.Entry.__gtype__)
-        except Exception:
-            pole_arkusz = None
-        if pole_arkusz is not None:
-            pole_arkusz.set_visible(False)
-        if isinstance(kontener_bazy, Gtk.Box):
-            kontener_bazy.pack_start(wybor_arkusza, False, False, 0)
-        else:
-            dialog.get_content_area().pack_start(wybor_arkusza, False, False, 0)
-        wybor_arkusza.set_no_show_all(True)
-        wybor_arkusza.hide()
-
-        _stan = {"aktualizacja_combo": False}
-
-        def po_zmianie_arkusza(combo):
-            if _stan["aktualizacja_combo"]:
-                return
-            wybrany = combo.get_active_text()
-            if wybrany:
-                config.set_property("arkusz", wybrany)
-
-        wybor_arkusza.connect("changed", po_zmianie_arkusza)
-
-        def odswiez_wybor_arkusza(sciezka_bazy):
-            try:
-                arkusze = db.lista_arkuszy(sciezka_bazy) if sciezka_bazy else []
-            except Exception:
-                arkusze = []
-            if len(arkusze) <= 1:
-                wybor_arkusza.hide()
-                if arkusze and config.get_property("arkusz") != arkusze[0]:
-                    config.set_property("arkusz", arkusze[0] if arkusze else "")
-                return
-            _stan["aktualizacja_combo"] = True
-            wybor_arkusza.remove_all()
-            for nazwa in arkusze:
-                wybor_arkusza.append_text(nazwa)
-            aktualny = config.get_property("arkusz") or arkusze[0]
-            if aktualny not in arkusze:
-                aktualny = arkusze[0]
-            wybor_arkusza.set_active(arkusze.index(aktualny))
-            _stan["aktualizacja_combo"] = False
-            if config.get_property("arkusz") != aktualny:
-                config.set_property("arkusz", aktualny)
-            wybor_arkusza.show()
-
-        def odswiez_licznik_wierszy(*_):
-            gfile = config.get_property("plik_baza")
-            sciezka_bazy = gfile.get_path() if gfile else None
-            if not sciezka_bazy:
-                licznik_wierszy.set_text("Baza: nie wybrano pliku.")
-                wybor_arkusza.hide()
-                return
-            odswiez_wybor_arkusza(sciezka_bazy)
-            try:
-                arkusz = config.get_property("arkusz")
-                liczba_wierszy = len(
-                    db.czytaj_plik(sciezka_bazy, self.schema(), arkusz)[0]
-                )
-                wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
-                wiersz_do = int(config.get_property("wiersz_do") or liczba_wierszy)
-                pierwszy = min(wiersz_od, liczba_wierszy)
-                ostatni = min(wiersz_do, liczba_wierszy)
-                wybranych = max(0, ostatni - pierwszy + 1)
-                licznik_wierszy.set_text(
-                    f"Baza: {liczba_wierszy} wierszy | "
-                    f"do przetworzenia: {wybranych} (wiersze {wiersz_od}-{ostatni})"
-                )
-            except Exception as e:
-                licznik_wierszy.set_text(f"Nie można odczytać bazy: {e}")
-
-        def po_zmianie_ustawienia(_config, pspec):
-            if pspec.name.replace("-", "_") in {
-                "plik_baza",
-                "arkusz",
-                "wiersz_od",
-                "wiersz_do",
-            }:
-                odswiez_licznik_wierszy()
-
-        config.connect("notify", po_zmianie_ustawienia)
-        odswiez_licznik_wierszy()
-        licznik_wierszy.show_all()
-
-        if not dialog.run():
-            dialog.destroy()
-            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-
-        dialog.destroy()
-
-        try:
-            katalog = self._pobierz_katalog(config)
-
-            # Tryb: generuj przykładowy CSV
-            if config.get_property("generuj_przyklad"):
-                sciezka_csv = os.path.join(
-                    katalog, f"przyklad_{self.PROCEDURE_NAME}.csv"
-                )
-                db.generuj_przykladowy_csv(sciezka_csv, self.schema())
-                Gimp.message(f"Zapisano przykładowy CSV:\n{sciezka_csv}")
-                return procedure.new_return_values(
-                    Gimp.PDBStatusType.SUCCESS, GLib.Error()
-                )
-
-            # Tryb: zapisz ustawienia do bazy (bez generowania)
-            if config.get_property("zapisz_do_bazy"):
-                dane = self.dane_z_config(config)
-                # Plik docelowy: plik_baza jeśli wybrany, else baza_PROCEDURE_NAME.csv w katalogu
-                gfile_baza = config.get_property("plik_baza")
-                if gfile_baza:
-                    sciezka_bazy = gfile_baza.get_path()
-                else:
-                    sciezka_bazy = os.path.join(
-                        katalog, f"baza_{self.PROCEDURE_NAME}.csv"
-                    )
-                nowy = db.dopisz_wiersz(sciezka_bazy, self.schema(), dane)
-                if nowy:
-                    Gimp.message(
-                        f"Stworzono nową bazę i zapisano wiersz:\n{sciezka_bazy}"
-                    )
-                else:
-                    Gimp.message(f"Dopisano wiersz do bazy:\n{sciezka_bazy}")
-                return procedure.new_return_values(
-                    Gimp.PDBStatusType.SUCCESS, GLib.Error()
-                )
-
-            gfile_baza = config.get_property("plik_baza")
-
-            if gfile_baza:
-                # Tryb wsadowy – z pliku
-                sciezka_baza = gfile_baza.get_path()
-                arkusz = config.get_property("arkusz")
-                wiersze, ostrzezenia = db.czytaj_plik(
-                    sciezka_baza, self.schema(), arkusz
-                )
-                if ostrzezenia:
-                    Gimp.message("Ostrzeżenia:\n" + "\n".join(ostrzezenia[:15]))
-                wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
-                wiersz_do = int(config.get_property("wiersz_do") or len(wiersze))
-                if wiersz_do < wiersz_od:
-                    raise ValueError(
-                        "Numer końcowego wiersza nie może być mniejszy od początkowego."
-                    )
-
-                wybrane_wiersze = list(
-                    enumerate(wiersze[wiersz_od - 1 : wiersz_do], start=wiersz_od)
-                )
-                if not wybrane_wiersze:
-                    raise ValueError("Wybrany zakres nie zawiera żadnych wierszy bazy.")
-
-                for numer, dane in wybrane_wiersze:
-                    self._generuj_i_zapisz(dane, config, katalog, numer=numer)
-                Gimp.message(
-                    f"Wygenerowano {len(wybrane_wiersze)} grafik "
-                    f"(wiersze {wiersz_od}-{wybrane_wiersze[-1][0]}) do:\n{katalog}"
-                )
-            else:
-                # Tryb pojedynczy – z formularza
-                dane = self.dane_z_config(config)
-                self._generuj_i_zapisz(dane, config, katalog, numer=None)
-                Gimp.message(f"Grafika zapisana do:\n{katalog}")
-
-        except Exception as e:
-            Gimp.message(f"BŁĄD:\n{e}\n\n{traceback.format_exc()}")
-            return procedure.new_return_values(
-                Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error()
-            )
-
-        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
     # ------------------------------------------------------------------ #
     # Metody do nadpisania w podklasie                                    #
@@ -404,16 +99,12 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         """Zwróć instancję BazaSchema dla tego pluginu."""
         raise NotImplementedError(f"{type(self).__name__} musi implementować schema()")
 
-    def rejestruj_argumenty(self, procedure):
-        """Rejestruj argumenty specyficzne dla pluginu (pola formularza)."""
-        pass
-
     def generuj(self, obraz: Gimp.Image, dane: dict, config) -> None:
         """
         Buduj zawartość obrazu.
         obraz – pusty obraz o wymiarach szerokosc_px x wysokosc_px @ DPI
         dane  – słownik z danymi (z bazy lub z formularza przez dane_z_config)
-        config – obiekt ProcedureConfig (dla odczytu plików/kolorów z formularza)
+        config – obiekt ProcedureConfig (dla odczytu plików/kolorów z formularza), może być None
         """
         raise NotImplementedError(f"{type(self).__name__} musi implementować generuj()")
 
@@ -471,13 +162,6 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         if numer is not None:
             return f"{numer:03d}_{slug}"
         return slug or "grafika"
-
-    def _pobierz_katalog(self, config) -> str:
-        gfile = config.get_property("katalog_zapis")
-        katalog = gfile.get_path() if gfile else None
-        if not katalog:
-            raise ValueError("Nie wybrano folderu do zapisu!")
-        return katalog
 
     def _zaladuj_db_reader(self):
         """Ładuje db_reader.py z folderu wspolne/ (obok pluginów)."""
@@ -823,3 +507,358 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
             odstep_liniowy=float(w.get("odstep_liniowy", 0.0)),
             odstep_liter=float(w.get("odstep_liter", 0.0)),
         )
+
+
+# ---------------------------------------------------------------------------
+# Plugin GIMP – dokłada rejestrację argumentów PDB i dialog
+# ---------------------------------------------------------------------------
+
+
+class BaseGeneratorPlugin(GeneratorCore, Gimp.PlugIn):
+    """
+    Bazowy plugin-generator: rejestruje procedurę PDB i obsługuje dialog GIMP.
+
+    Podklasa MUSI nadpisać:
+        PROCEDURE_NAME, MENU_LABEL
+        schema()
+        rejestruj_argumenty(procedure)
+        generuj(obraz, dane, config)
+
+    Podklasa MOŻE nadpisać:
+        MENU_PATH, OPIS_KROTKI, OPIS_DLUGI
+        szerokosc_px, wysokosc_px
+        slugify_klucz (nazwa kolumny używanej do nazwy pliku)
+    """
+
+    # --- do nadpisania ---
+    PROCEDURE_NAME: str = "python-fu-base-generator"
+    MENU_LABEL: str = "Generator (base)"
+    MENU_PATH: str = "<Image>/Filtry/GeneratorKart/"
+    OPIS_KROTKI: str = "Generator grafik"
+    OPIS_DLUGI: str = "Generator grafik z obsługą bazy danych"
+
+    # ------------------------------------------------------------------ #
+    # Rejestracja – nie nadpisuj, używaj rejestruj_argumenty()            #
+    # ------------------------------------------------------------------ #
+
+    def do_query_procedures(self):
+        return [self.PROCEDURE_NAME]
+
+    def do_create_procedure(self, name):
+        procedure = Gimp.ImageProcedure.new(
+            self, name, Gimp.PDBProcType.PLUGIN, self.run, None
+        )
+        procedure.set_image_types("*")
+        procedure.set_sensitivity_mask(
+            Gimp.ProcedureSensitivityMask.DRAWABLE
+            | Gimp.ProcedureSensitivityMask.NO_DRAWABLES
+            | Gimp.ProcedureSensitivityMask.NO_IMAGE
+        )
+        procedure.set_documentation(self.OPIS_KROTKI, self.OPIS_DLUGI, name)
+        procedure.set_menu_label(self.MENU_LABEL)
+        procedure.add_menu_path(self.MENU_PATH)
+
+        rw = GObject.ParamFlags.READWRITE
+
+        # Wspólne argumenty dla wszystkich pluginów
+        procedure.add_file_argument(
+            "katalog_zapis",
+            "Folder do zapisu:",
+            "Gdzie zapisać pliki wynikowe (PNG + XCF)",
+            Gimp.FileChooserAction.SELECT_FOLDER,
+            True,
+            None,
+            rw,
+        )
+        procedure.add_file_argument(
+            "plik_baza",
+            "Plik bazy danych (opcjonalnie):",
+            "Excel (.xlsx) lub CSV. Jeśli wybrany – generuje wiele grafik wsadowo.",
+            Gimp.FileChooserAction.OPEN,
+            True,
+            None,
+            rw,
+        )
+        procedure.add_string_argument(
+            "arkusz",
+            "Arkusz Excel:",
+            "Nazwa arkusza do odczytu. Wymagana, jeśli plik ma więcej niż 1 arkusz.",
+            "",
+            rw,
+        )
+        procedure.add_int_argument(
+            "wiersz_od",
+            "Przetwarzaj wiersze od:",
+            "Numer pierwszego wiersza danych w bazie; 0 oznacza pierwszy wiersz.",
+            0,
+            1_000_000,
+            0,
+            rw,
+        )
+        procedure.add_int_argument(
+            "wiersz_do",
+            "Przetwarzaj wiersze do:",
+            "Numer ostatniego wiersza danych w bazie; 0 oznacza ostatni wiersz.",
+            0,
+            1_000_000,
+            0,
+            rw,
+        )
+        procedure.add_boolean_argument(
+            "generuj_przyklad",
+            "Zapisz przykładowy CSV:",
+            "Zapisuje przykładowy plik CSV do folderu zapisu i kończy działanie",
+            False,
+            rw,
+        )
+        procedure.add_boolean_argument(
+            "zapisz_do_bazy",
+            "Zapisz ustawienia do bazy (nie generuj):",
+            "Dopisuje bieżące ustawienia formularza jako nowy wiersz do CSV zamiast generować grafikę",
+            False,
+            rw,
+        )
+
+        # Opcjonalne wymiary (mm) — pozwalają nadpisać wymiar obrazu z dialogu
+        procedure.add_int_argument(
+            "szerokosc_mm",
+            "Szerokość karty (mm):",
+            "Szerokość karty w milimetrach (bez spadów)",
+            10,
+            500,
+            50,
+            rw,
+        )
+        procedure.add_int_argument(
+            "wysokosc_mm",
+            "Wysokość karty (mm):",
+            "Wysokość karty w milimetrach (bez spadów)",
+            10,
+            1000,
+            90,
+            rw,
+        )
+
+        # Argumenty specyficzne dla danego pluginu
+        self.rejestruj_argumenty(procedure)
+
+        return procedure
+
+    # ------------------------------------------------------------------ #
+    # Run – logika wspólna                                                 #
+    # ------------------------------------------------------------------ #
+
+    def run(self, procedure, run_mode, image, drawables, config, run_data):
+        GimpUi.init(self.PROCEDURE_NAME)
+        db = self._zaladuj_db_reader()
+
+        dialog = GimpUi.ProcedureDialog.new(procedure, config, None)
+        dialog.fill(None)
+
+        licznik_wierszy = Gtk.Label()
+        licznik_wierszy.set_xalign(0.0)
+        licznik_wierszy.set_margin_top(8)
+        try:
+            wybor_bazy = dialog.get_widget("plik_baza", GimpUi.FileChooser.__gtype__)
+            kontener_bazy = wybor_bazy.get_parent() if wybor_bazy else None
+        except Exception:
+            kontener_bazy = None
+        if isinstance(kontener_bazy, Gtk.Box):
+            kontener_bazy.pack_start(licznik_wierszy, False, False, 0)
+        else:
+            dialog.get_content_area().pack_start(licznik_wierszy, False, False, 0)
+
+        # Combo do wyboru arkusza – zastępuje domyślne pole tekstowe "arkusz",
+        # widoczne tylko gdy plik ma więcej niż 1 arkusz. Umieszczany zaraz
+        # pod licznikiem wierszy, w tym samym kontenerze co wybór bazy danych.
+        wybor_arkusza = Gtk.ComboBoxText()
+        wybor_arkusza.set_margin_top(4)
+        try:
+            pole_arkusz = dialog.get_widget("arkusz", Gtk.Entry.__gtype__)
+        except Exception:
+            pole_arkusz = None
+        if pole_arkusz is not None:
+            pole_arkusz.set_visible(False)
+        if isinstance(kontener_bazy, Gtk.Box):
+            kontener_bazy.pack_start(wybor_arkusza, False, False, 0)
+        else:
+            dialog.get_content_area().pack_start(wybor_arkusza, False, False, 0)
+        wybor_arkusza.set_no_show_all(True)
+        wybor_arkusza.hide()
+
+        _stan = {"aktualizacja_combo": False}
+
+        def po_zmianie_arkusza(combo):
+            if _stan["aktualizacja_combo"]:
+                return
+            wybrany = combo.get_active_text()
+            if wybrany:
+                config.set_property("arkusz", wybrany)
+
+        wybor_arkusza.connect("changed", po_zmianie_arkusza)
+
+        def odswiez_wybor_arkusza(sciezka_bazy):
+            try:
+                arkusze = db.lista_arkuszy(sciezka_bazy) if sciezka_bazy else []
+            except Exception:
+                arkusze = []
+            if len(arkusze) <= 1:
+                wybor_arkusza.hide()
+                if arkusze and config.get_property("arkusz") != arkusze[0]:
+                    config.set_property("arkusz", arkusze[0] if arkusze else "")
+                return
+            _stan["aktualizacja_combo"] = True
+            wybor_arkusza.remove_all()
+            for nazwa in arkusze:
+                wybor_arkusza.append_text(nazwa)
+            aktualny = config.get_property("arkusz") or arkusze[0]
+            if aktualny not in arkusze:
+                aktualny = arkusze[0]
+            wybor_arkusza.set_active(arkusze.index(aktualny))
+            _stan["aktualizacja_combo"] = False
+            if config.get_property("arkusz") != aktualny:
+                config.set_property("arkusz", aktualny)
+            wybor_arkusza.show()
+
+        def odswiez_licznik_wierszy(*_):
+            gfile = config.get_property("plik_baza")
+            sciezka_bazy = gfile.get_path() if gfile else None
+            if not sciezka_bazy:
+                licznik_wierszy.set_text("Baza: nie wybrano pliku.")
+                wybor_arkusza.hide()
+                return
+            odswiez_wybor_arkusza(sciezka_bazy)
+            try:
+                arkusz = config.get_property("arkusz")
+                liczba_wierszy = len(
+                    db.czytaj_plik(sciezka_bazy, self.schema(), arkusz)[0]
+                )
+                wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
+                wiersz_do = int(config.get_property("wiersz_do") or liczba_wierszy)
+                pierwszy = min(wiersz_od, liczba_wierszy)
+                ostatni = min(wiersz_do, liczba_wierszy)
+                wybranych = max(0, ostatni - pierwszy + 1)
+                licznik_wierszy.set_text(
+                    f"Baza: {liczba_wierszy} wierszy | "
+                    f"do przetworzenia: {wybranych} (wiersze {wiersz_od}-{ostatni})"
+                )
+            except Exception as e:
+                licznik_wierszy.set_text(f"Nie można odczytać bazy: {e}")
+
+        def po_zmianie_ustawienia(_config, pspec):
+            if pspec.name.replace("-", "_") in {
+                "plik_baza",
+                "arkusz",
+                "wiersz_od",
+                "wiersz_do",
+            }:
+                odswiez_licznik_wierszy()
+
+        config.connect("notify", po_zmianie_ustawienia)
+        odswiez_licznik_wierszy()
+        licznik_wierszy.show_all()
+
+        if not dialog.run():
+            dialog.destroy()
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+
+        dialog.destroy()
+
+        try:
+            katalog = self._pobierz_katalog(config)
+
+            # Tryb: generuj przykładowy CSV
+            if config.get_property("generuj_przyklad"):
+                sciezka_csv = os.path.join(
+                    katalog, f"przyklad_{self.PROCEDURE_NAME}.csv"
+                )
+                db.generuj_przykladowy_csv(sciezka_csv, self.schema())
+                Gimp.message(f"Zapisano przykładowy CSV:\n{sciezka_csv}")
+                return procedure.new_return_values(
+                    Gimp.PDBStatusType.SUCCESS, GLib.Error()
+                )
+
+            # Tryb: zapisz ustawienia do bazy (bez generowania)
+            if config.get_property("zapisz_do_bazy"):
+                dane = self.dane_z_config(config)
+                # Plik docelowy: plik_baza jeśli wybrany, else baza_PROCEDURE_NAME.csv w katalogu
+                gfile_baza = config.get_property("plik_baza")
+                if gfile_baza:
+                    sciezka_bazy = gfile_baza.get_path()
+                else:
+                    sciezka_bazy = os.path.join(
+                        katalog, f"baza_{self.PROCEDURE_NAME}.csv"
+                    )
+                nowy = db.dopisz_wiersz(sciezka_bazy, self.schema(), dane)
+                if nowy:
+                    Gimp.message(
+                        f"Stworzono nową bazę i zapisano wiersz:\n{sciezka_bazy}"
+                    )
+                else:
+                    Gimp.message(f"Dopisano wiersz do bazy:\n{sciezka_bazy}")
+                return procedure.new_return_values(
+                    Gimp.PDBStatusType.SUCCESS, GLib.Error()
+                )
+
+            gfile_baza = config.get_property("plik_baza")
+
+            if gfile_baza:
+                # Tryb wsadowy – z pliku
+                sciezka_baza = gfile_baza.get_path()
+                arkusz = config.get_property("arkusz")
+                wiersze, ostrzezenia = db.czytaj_plik(
+                    sciezka_baza, self.schema(), arkusz
+                )
+                if ostrzezenia:
+                    Gimp.message("Ostrzeżenia:\n" + "\n".join(ostrzezenia[:15]))
+                wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
+                wiersz_do = int(config.get_property("wiersz_do") or len(wiersze))
+                if wiersz_do < wiersz_od:
+                    raise ValueError(
+                        "Numer końcowego wiersza nie może być mniejszy od początkowego."
+                    )
+
+                wybrane_wiersze = list(
+                    enumerate(wiersze[wiersz_od - 1 : wiersz_do], start=wiersz_od)
+                )
+                if not wybrane_wiersze:
+                    raise ValueError("Wybrany zakres nie zawiera żadnych wierszy bazy.")
+
+                for numer, dane in wybrane_wiersze:
+                    self._generuj_i_zapisz(dane, config, katalog, numer=numer)
+                Gimp.message(
+                    f"Wygenerowano {len(wybrane_wiersze)} grafik "
+                    f"(wiersze {wiersz_od}-{wybrane_wiersze[-1][0]}) do:\n{katalog}"
+                )
+            else:
+                # Tryb pojedynczy – z formularza
+                dane = self.dane_z_config(config)
+                self._generuj_i_zapisz(dane, config, katalog, numer=None)
+                Gimp.message(f"Grafika zapisana do:\n{katalog}")
+
+        except Exception as e:
+            Gimp.message(f"BŁĄD:\n{e}\n\n{traceback.format_exc()}")
+            return procedure.new_return_values(
+                Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error()
+            )
+
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+    # ------------------------------------------------------------------ #
+    # Metoda do nadpisania w podklasie                                    #
+    # ------------------------------------------------------------------ #
+
+    def rejestruj_argumenty(self, procedure):
+        """Rejestruj argumenty specyficzne dla pluginu (pola formularza)."""
+        pass
+
+    # ------------------------------------------------------------------ #
+    # Wewnętrzne – nie nadpisuj                                           #
+    # ------------------------------------------------------------------ #
+
+    def _pobierz_katalog(self, config) -> str:
+        gfile = config.get_property("katalog_zapis")
+        katalog = gfile.get_path() if gfile else None
+        if not katalog:
+            raise ValueError("Nie wybrano folderu do zapisu!")
+        return katalog

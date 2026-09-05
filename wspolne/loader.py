@@ -8,7 +8,10 @@ Każdy plugin używa tego tak:
     from loader import BaseGeneratorPlugin, mm, db, Gimp, GObject, Gegl, GimpUi, GLib, Gio
 
 Eksportuje:
-    BaseGeneratorPlugin  – klasa bazowa pluginu
+    BaseGeneratorPlugin  – klasa bazowa pluginu (PDB + dialog)
+    GeneratorCore        – czysta logika generatora, bez Gimp.PlugIn (bezpieczna
+                           do bezpo\u015bredniego instancjonowania poza dzia\u0142aniem
+                           GIMP, np. w uberskrypcie)
     mm(val)              – przelicznik mm -> px (300 DPI)
     db                   – moduł db_reader (czytaj_plik, BazaSchema, Schema*, ...)
     Gimp, GimpUi, GObject, Gegl, GLib, Gio  – moduły gi (zainicjowane raz)
@@ -47,10 +50,12 @@ db = _load("db_reader", "db_reader.py")
 
 # Eksportuj wprost
 BaseGeneratorPlugin = _base.BaseGeneratorPlugin
+GeneratorCore = _base.GeneratorCore
 mm = _base.mm
 
 __all__ = [
     "BaseGeneratorPlugin",
+    "GeneratorCore",
     "mm",
     "db",
     "Gimp",

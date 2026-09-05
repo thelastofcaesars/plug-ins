@@ -4,7 +4,13 @@
 """
 karta_hipoteczna.py – plugin generatora kart hipotecznych.
 
-Dziedziczy po BaseGeneratorPlugin (wspolne/base_plugin.py).
+Dwie klasy:
+  - KartaHipotecznaLogic  – czysta logika (GeneratorCore), bez Gimp.PlugIn.
+                            Bezpieczna do bezpośredniego instancjonowania,
+                            np. z uberskryptu wsadowego.
+  - KartaHipoteczna       – wersja samodzielna: dokłada rejestrację PDB
+                            i dialog GIMP (BaseGeneratorPlugin).
+
 Ten plik odpowiada TYLKO za:
   - schema()              – opis kolumn bazy danych
   - rejestruj_argumenty() – pola specyficzne w dialogu GIMP
@@ -21,7 +27,15 @@ _WSPOLNE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wspolne")
 if _WSPOLNE not in sys.path:
     sys.path.insert(0, _WSPOLNE)
 
-from loader import BaseGeneratorPlugin, mm, db as _db, Gimp, GObject, Gegl  # noqa: E402
+from loader import (  # noqa: E402
+    BaseGeneratorPlugin,
+    GeneratorCore,
+    mm,
+    db as _db,
+    Gimp,
+    GObject,
+    Gegl,
+)
 
 # ---------------------------------------------------------------------------
 # Stale ukladu karty
@@ -41,7 +55,7 @@ _REL = {
 }
 
 
-class KartaHipoteczna(BaseGeneratorPlugin):
+class KartaHipotecznaLogic(GeneratorCore):
     """Generator kart hipotecznych 5x9 cm z spadami."""
 
     PROCEDURE_NAME = "python-fu-karta-hipoteczna"
@@ -296,6 +310,10 @@ class KartaHipoteczna(BaseGeneratorPlugin):
 
         stopka = "\n".join(l.strip() for l in (dane.get("stopka") or "").split("|"))
         self.tekst_z_szablonu(obraz, szablony, "stopka", stopka, W, H)
+
+
+class KartaHipoteczna(KartaHipotecznaLogic, BaseGeneratorPlugin):
+    """Wersja samodzielna: rejestruje procedurę PDB i dialog GIMP."""
 
 
 if __name__ == "__main__":

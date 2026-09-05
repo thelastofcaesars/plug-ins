@@ -19,7 +19,15 @@ _WSPOLNE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wspolne")
 if _WSPOLNE not in sys.path:
     sys.path.insert(0, _WSPOLNE)
 
-from loader import BaseGeneratorPlugin, mm, db as _db, Gimp, GObject, Gegl  # noqa: E402
+from loader import (  # noqa: E402
+    BaseGeneratorPlugin,
+    GeneratorCore,
+    mm,
+    db as _db,
+    Gimp,
+    GObject,
+    Gegl,
+)
 
 BLEED_MM = 3
 KARTA_W_MM = 50
@@ -34,7 +42,7 @@ _REL = {
 JSON_SZABLON = os.path.join(os.path.dirname(os.path.dirname(__file__)), "awers.json")
 
 
-class KartaAktWlasnosci(BaseGeneratorPlugin):
+class KartaAktWlasnosciLogic(GeneratorCore):
     """Generator kart aktu własności 5x9 cm z dokładnym układem z awers.json."""
 
     PROCEDURE_NAME = "python-fu-karta-akt-wlasnosci"
@@ -258,6 +266,10 @@ class KartaAktWlasnosci(BaseGeneratorPlugin):
 
         stopka = "\n".join(l.strip() for l in (dane.get("stopka") or "").split("|"))
         self.tekst_z_szablonu(obraz, szablony, "stopka", stopka, W, H)
+
+
+class KartaAktWlasnosci(KartaAktWlasnosciLogic, BaseGeneratorPlugin):
+    """Wersja samodzielna: rejestruje procedurę PDB i dialog GIMP."""
 
 
 if __name__ == "__main__":
