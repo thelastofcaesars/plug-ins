@@ -357,8 +357,33 @@ def czytaj_csv(sciezka: str, schema: BazaSchema) -> tuple[list[dict], list[str]]
 # ---------------------------------------------------------------------------
 
 
-def czytaj_excel(sciezka: str, schema: BazaSchema) -> tuple[list[dict], list[str]]:
-    """Czyta .xlsx i zwraca (wiersze, ostrzeżenia). Wymaga openpyxl."""
+def lista_arkuszy(sciezka: str) -> list[str]:
+    """Zwraca listę nazw arkuszy pliku .xlsx/.xlsm. Pusta lista dla innych formatów."""
+    ext = os.path.splitext(sciezka)[1].lower()
+    if ext not in (".xlsx", ".xlsm") or not os.path.isfile(sciezka):
+        return []
+    try:
+        import openpyxl
+    except ImportError:
+        raise ImportError(
+            "Brak biblioteki 'openpyxl'.\n"
+            "Zainstaluj: pip install openpyxl\n"
+            "(użyj Pythona z GIMP: A:/GIMP 3/bin/python3.exe)"
+        )
+    wb = openpyxl.load_workbook(sciezka, read_only=True)
+    nazwy = list(wb.sheetnames)
+    wb.close()
+    return nazwy
+
+
+def czytaj_excel(
+    sciezka: str, schema: BazaSchema, arkusz: str | None = None
+) -> tuple[list[dict], list[str]]:
+    """Czyta .xlsx i zwraca (wiersze, ostrzeżenia). Wymaga openpyxl.
+
+    arkusz – nazwa arkusza do odczytu. Jeśli None/pusta, a plik ma więcej niż
+    jeden arkusz, zgłasza błąd z listą dostępnych arkuszy do wyboru.
+    """
     try:
         import openpyxl
     except ImportError:
@@ -369,7 +394,24 @@ def czytaj_excel(sciezka: str, schema: BazaSchema) -> tuple[list[dict], list[str
         )
 
     wb = openpyxl.load_workbook(sciezka, read_only=True, data_only=True)
-    ws = wb.active
+    arkusz = (arkusz or "").strip()
+    if arkusz:
+        if arkusz not in wb.sheetnames:
+            wb.close()
+            raise ValueError(
+                f"Arkusz '{arkusz}' nie istnieje w pliku. "
+                f"Dostępne arkusze: {', '.join(wb.sheetnames)}"
+            )
+        ws = wb[arkusz]
+    elif len(wb.sheetnames) > 1:
+        dostepne = wb.sheetnames
+        wb.close()
+        raise ValueError(
+            "Plik zawiera wiele arkuszy – wybierz jeden. "
+            f"Dostępne arkusze: {', '.join(dostepne)}"
+        )
+    else:
+        ws = wb.active
     wiersze = []
     ostrzezenia = []
     naglowki: list[str] = []
@@ -401,17 +443,20 @@ def czytaj_excel(sciezka: str, schema: BazaSchema) -> tuple[list[dict], list[str
 # ---------------------------------------------------------------------------
 
 
-def czytaj_plik(sciezka: str, schema: BazaSchema) -> tuple[list[dict], list[str]]:
+def czytaj_plik(
+    sciezka: str, schema: BazaSchema, arkusz: str | None = None
+) -> tuple[list[dict], list[str]]:
     """
     Czyta Excel lub CSV na podstawie rozszerzenia.
     Zwraca (lista_słowników, lista_ostrzeżeń).
+    arkusz – nazwa arkusza (tylko dla Excel); ignorowana dla CSV.
     """
     if not os.path.isfile(sciezka):
         raise FileNotFoundError(f"Plik nie istnieje: {sciezka}")
 
     ext = os.path.splitext(sciezka)[1].lower()
     if ext in (".xlsx", ".xlsm"):
-        return czytaj_excel(sciezka, schema)
+        return czytaj_excel(sciezka, schema, arkusz)
     elif ext in (".csv", ".tsv", ".txt"):
         return czytaj_csv(sciezka, schema)
     else:

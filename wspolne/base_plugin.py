@@ -131,6 +131,13 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
             None,
             rw,
         )
+        procedure.add_string_argument(
+            "arkusz",
+            "Arkusz Excel:",
+            "Nazwa arkusza do odczytu. Wymagana, jeśli plik ma więcej niż 1 arkusz.",
+            "",
+            rw,
+        )
         procedure.add_int_argument(
             "wiersz_od",
             "Przetwarzaj wiersze od:",
@@ -213,14 +220,71 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         else:
             dialog.get_content_area().pack_start(licznik_wierszy, False, False, 0)
 
+        # Combo do wyboru arkusza – zastępuje domyślne pole tekstowe "arkusz",
+        # widoczne tylko gdy plik ma więcej niż 1 arkusz. Umieszczany zaraz
+        # pod licznikiem wierszy, w tym samym kontenerze co wybór bazy danych.
+        wybor_arkusza = Gtk.ComboBoxText()
+        wybor_arkusza.set_margin_top(4)
+        try:
+            pole_arkusz = dialog.get_widget("arkusz", Gtk.Entry.__gtype__)
+        except Exception:
+            pole_arkusz = None
+        if pole_arkusz is not None:
+            pole_arkusz.set_visible(False)
+        if isinstance(kontener_bazy, Gtk.Box):
+            kontener_bazy.pack_start(wybor_arkusza, False, False, 0)
+        else:
+            dialog.get_content_area().pack_start(wybor_arkusza, False, False, 0)
+        wybor_arkusza.set_no_show_all(True)
+        wybor_arkusza.hide()
+
+        _stan = {"aktualizacja_combo": False}
+
+        def po_zmianie_arkusza(combo):
+            if _stan["aktualizacja_combo"]:
+                return
+            wybrany = combo.get_active_text()
+            if wybrany:
+                config.set_property("arkusz", wybrany)
+
+        wybor_arkusza.connect("changed", po_zmianie_arkusza)
+
+        def odswiez_wybor_arkusza(sciezka_bazy):
+            try:
+                arkusze = db.lista_arkuszy(sciezka_bazy) if sciezka_bazy else []
+            except Exception:
+                arkusze = []
+            if len(arkusze) <= 1:
+                wybor_arkusza.hide()
+                if arkusze and config.get_property("arkusz") != arkusze[0]:
+                    config.set_property("arkusz", arkusze[0] if arkusze else "")
+                return
+            _stan["aktualizacja_combo"] = True
+            wybor_arkusza.remove_all()
+            for nazwa in arkusze:
+                wybor_arkusza.append_text(nazwa)
+            aktualny = config.get_property("arkusz") or arkusze[0]
+            if aktualny not in arkusze:
+                aktualny = arkusze[0]
+            wybor_arkusza.set_active(arkusze.index(aktualny))
+            _stan["aktualizacja_combo"] = False
+            if config.get_property("arkusz") != aktualny:
+                config.set_property("arkusz", aktualny)
+            wybor_arkusza.show()
+
         def odswiez_licznik_wierszy(*_):
             gfile = config.get_property("plik_baza")
             sciezka_bazy = gfile.get_path() if gfile else None
             if not sciezka_bazy:
                 licznik_wierszy.set_text("Baza: nie wybrano pliku.")
+                wybor_arkusza.hide()
                 return
+            odswiez_wybor_arkusza(sciezka_bazy)
             try:
-                liczba_wierszy = len(db.czytaj_plik(sciezka_bazy, self.schema())[0])
+                arkusz = config.get_property("arkusz")
+                liczba_wierszy = len(
+                    db.czytaj_plik(sciezka_bazy, self.schema(), arkusz)[0]
+                )
                 wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
                 wiersz_do = int(config.get_property("wiersz_do") or liczba_wierszy)
                 pierwszy = min(wiersz_od, liczba_wierszy)
@@ -236,6 +300,7 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
         def po_zmianie_ustawienia(_config, pspec):
             if pspec.name.replace("-", "_") in {
                 "plik_baza",
+                "arkusz",
                 "wiersz_od",
                 "wiersz_do",
             }:
@@ -292,7 +357,10 @@ class BaseGeneratorPlugin(Gimp.PlugIn):
             if gfile_baza:
                 # Tryb wsadowy – z pliku
                 sciezka_baza = gfile_baza.get_path()
-                wiersze, ostrzezenia = db.czytaj_plik(sciezka_baza, self.schema())
+                arkusz = config.get_property("arkusz")
+                wiersze, ostrzezenia = db.czytaj_plik(
+                    sciezka_baza, self.schema(), arkusz
+                )
                 if ostrzezenia:
                     Gimp.message("Ostrzeżenia:\n" + "\n".join(ostrzezenia[:15]))
                 wiersz_od = max(1, int(config.get_property("wiersz_od") or 1))
