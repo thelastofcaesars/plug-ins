@@ -28,6 +28,10 @@ import os
 import sys
 import traceback
 import importlib.util
+import tempfile
+import hashlib
+import urllib.request
+import urllib.parse
 
 import gi
 
@@ -317,10 +321,21 @@ class GeneratorCore:
         return szer_px, wys_px
 
     def sciezka_grafiki(self, dane: dict, klucz: str, config=None) -> str:
-        """Zwraca ścieżkę – najpierw z bazy, potem z formularza."""
+        """Zwraca ścieżkę – najpierw z bazy, potem z formularza.
+
+        Jeśli wartość z bazy jest linkiem http(s)://, plik jest pobierany do
+        folderu tymczasowego (i pobierany tylko raz – przy kolejnych
+        wywołaniach używana jest wersja z cache).
+        """
         sciezka = dane.get(klucz, "").strip()
-        if sciezka and os.path.isfile(sciezka):
-            return sciezka
+        if sciezka:
+            if self._czy_url(sciezka):
+                try:
+                    return self._pobierz_lub_z_cache(sciezka)
+                except Exception:
+                    return ""
+            if os.path.isfile(sciezka):
+                return sciezka
         if config:
             try:
                 gfile = config.get_property(klucz)
@@ -331,6 +346,28 @@ class GeneratorCore:
             except Exception:
                 pass
         return ""
+
+    @staticmethod
+    def _czy_url(tekst: str) -> bool:
+        return tekst.lower().startswith(("http://", "https://"))
+
+    def _pobierz_lub_z_cache(self, url: str) -> str:
+        """Pobiera plik spod URL do wspólnego folderu tymczasowego (albo zwraca
+        już wcześniej pobraną kopię, jeśli istnieje)."""
+        katalog_cache = os.path.join(tempfile.gettempdir(), "gimp_karty_pobrane")
+        os.makedirs(katalog_cache, exist_ok=True)
+
+        nazwa_pliku = os.path.basename(urllib.parse.urlparse(url).path) or "plik"
+        skrot = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
+        docelowy = os.path.join(katalog_cache, f"{skrot}_{nazwa_pliku}")
+
+        if not os.path.isfile(docelowy):
+            with urllib.request.urlopen(url, timeout=15) as odpowiedz:
+                dane_pliku = odpowiedz.read()
+            with open(docelowy, "wb") as f:
+                f.write(dane_pliku)
+
+        return docelowy
 
     def tekst(
         self,
