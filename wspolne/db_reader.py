@@ -376,6 +376,30 @@ def lista_arkuszy(sciezka: str) -> list[str]:
     return nazwy
 
 
+def _czytaj_arkusz_surowo(ws) -> list[tuple[int, dict]]:
+    """Czyta surowe wiersze arkusza (bez schematu). Zwraca [(numer_wiersza, wiersz), ...]."""
+    wiersze: list[tuple[int, dict]] = []
+    naglowki: list[str] = []
+
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i == 0:
+            naglowki = [
+                str(c).strip().lower().replace(" ", "_") if c else f"_kol{j}"
+                for j, c in enumerate(row)
+            ]
+            continue
+        if all(v is None for v in row):
+            continue  # pomijamy puste wiersze
+        wiersz = {
+            naglowki[j]: (str(v).strip() if v is not None else "")
+            for j, v in enumerate(row)
+            if j < len(naglowki)
+        }
+        wiersze.append((i + 1, wiersz))
+
+    return wiersze
+
+
 def czytaj_excel(
     sciezka: str, schema: BazaSchema, arkusz: str | None = None
 ) -> tuple[list[dict], list[str]]:
@@ -383,6 +407,16 @@ def czytaj_excel(
 
     arkusz – nazwa arkusza do odczytu. Jeśli None/pusta, a plik ma więcej niż
     jeden arkusz, zgłasza błąd z listą dostępnych arkuszy do wyboru.
+
+    Jeśli plik zawiera arkusz "GLOBAL", jest on używany jako tabela fallbacków
+    dla pustych pól w pozostałych arkuszach:
+      - pierwsza kolumna arkusza GLOBAL to klucz wyszukiwania (np. "terrain_type").
+        Wiersz danych wybiera wpis GLOBAL po własnej kolumnie o tej samej nazwie
+        (dopasowanie bez uwzględniania wielkości liter); jeśli jej nie poda lub
+        arkusz GLOBAL ma tylko 1 wiersz, używany jest pierwszy wiersz GLOBAL
+        (czyli w powyższym przykładzie domyślnie "NEUTRAL").
+      - pozostałe kolumny GLOBAL (np. "kolor_hex", "plik_terrain") uzupełniają
+        tylko te pola wiersza, które są puste.
     """
     try:
         import openpyxl
@@ -412,26 +446,42 @@ def czytaj_excel(
         )
     else:
         ws = wb.active
+
+    # Tabela fallbacków z arkusza "GLOBAL", o ile istnieje i nie jest to ten
+    # sam arkusz, który już czytamy.
+    globalne_wiersze: list[dict] = []
+    klucz_global: str | None = None
+    nazwa_global = next(
+        (s for s in wb.sheetnames if s.strip().upper() == "GLOBAL"), None
+    )
+    if nazwa_global and nazwa_global != ws.title:
+        globalne_wiersze = [w for _, w in _czytaj_arkusz_surowo(wb[nazwa_global])]
+        if globalne_wiersze:
+            klucz_global = next(iter(globalne_wiersze[0]))  # pierwsza kolumna = klucz
+
+    def _dopasuj_global(wiersz: dict) -> dict:
+        if not globalne_wiersze:
+            return {}
+        if not klucz_global or len(globalne_wiersze) == 1:
+            return globalne_wiersze[0]
+        wartosc_klucza = (wiersz.get(klucz_global) or "").strip().lower()
+        if not wartosc_klucza:
+            return globalne_wiersze[0]  # brak wskazania -> domyślny (pierwszy) wiersz
+        for kandydat in globalne_wiersze:
+            if (kandydat.get(klucz_global) or "").strip().lower() == wartosc_klucza:
+                return kandydat
+        return globalne_wiersze[0]  # brak dopasowania -> domyślny (pierwszy) wiersz
+
     wiersze = []
     ostrzezenia = []
-    naglowki: list[str] = []
-
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i == 0:
-            naglowki = [
-                str(c).strip().lower().replace(" ", "_") if c else f"_kol{j}"
-                for j, c in enumerate(row)
-            ]
-            continue
-        if all(v is None for v in row):
-            continue  # pomijamy puste wiersze
-        wiersz = {
-            naglowki[j]: (str(v).strip() if v is not None else "")
-            for j, v in enumerate(row)
-            if j < len(naglowki)
-        }
+    for numer, wiersz in _czytaj_arkusz_surowo(ws):
+        for klucz, wartosc_global in _dopasuj_global(wiersz).items():
+            if klucz == klucz_global:
+                continue  # nie nadpisuj kolumny-klucza wyszukiwania
+            if wartosc_global and not (wiersz.get(klucz) or "").strip():
+                wiersz[klucz] = wartosc_global
         wiersz = schema.uzupelnij_domyslnymi(wiersz)
-        ostrzezenia.extend(schema.waliduj_wiersz(wiersz, i + 1))
+        ostrzezenia.extend(schema.waliduj_wiersz(wiersz, numer))
         wiersze.append(wiersz)
 
     wb.close()
