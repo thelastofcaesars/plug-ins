@@ -211,61 +211,49 @@ class XcfTemplateGenerator(Gimp.PlugIn):
     @classmethod
     def _mapping(cls, layer):
         name = layer.get_name() or ""
+        map_type = "tbc"  # default type before parsing
         parts = [part.strip() for part in name.split(":")]
-        if len(parts) == 3:
-            layer_name, declared_type, db_name = parts
-            declared_type = declared_type.lower()
-            db_name = db_name.lower().replace(" ", "_")
-            if declared_type not in {"text", "img", "shape"} or not db_name:
-                return None
-            return {
-                "layer_name": layer_name or name,
-                "declared_type": declared_type,
-                "db_name": db_name,
-                "horizontal_anchor": None,
-                "vertical_anchor": None,
-            }
+        layer_name = parts[0] or name
+        available_types = {"text", "img", "shape"}
+        used_indexes = {0}
+        for index, part in enumerate(parts[1:], start=1):
+            if part.lower() in available_types:
+                used_indexes.add(index)
+                map_type = part.lower()
+                break
 
-        if len(parts) >= 4:
-            layer_name, declared_type, db_name = parts[:3]
-            declared_type = declared_type.lower()
-            db_name = db_name.lower().replace(" ", "_")
-            options = {part.lower() for part in parts[3:]}
-            position = next(
-                (re.fullmatch(r"pos_([lcmr])([tmb])", option) for option in options),
-                None,
-            )
-            horizontal_anchor = position.group(1) if position else None
-            vertical_anchor = position.group(2) if position else None
-            if declared_type not in {"text", "img", "shape"} or not db_name:
-                return None
-            return {
-                "layer_name": layer_name or name,
-                "declared_type": declared_type,
-                "db_name": db_name,
-                "horizontal_anchor": horizontal_anchor,
-                "vertical_anchor": vertical_anchor,
-            }
+        position_match = next(
+            (
+                (index, re.fullmatch(r"pos_([lcmr])([tmb])", part.lower()))
+                for index, part in enumerate(parts[1:], start=1)
+                if index not in used_indexes
+                and re.fullmatch(r"pos_([lcmr])([tmb])", part.lower())
+            ),
+            None,
+        )
+        horizontal_anchor = None
+        vertical_anchor = None
+        if position_match is not None:
+            position_index, position = position_match
+            used_indexes.add(position_index)
+            horizontal_anchor = position.group(1)
+            vertical_anchor = position.group(2)
 
-        # Kompatybilnosc z pierwsza wersja eksperymentu.
-        if len(parts) == 2:
-            prefix, key = parts
-            prefix = {"txt": "text", "img": "img"}.get(prefix.lower())
-            key = key.lower().replace(" ", "_")
-            if prefix and key:
-                return {
-                    "layer_name": name,
-                    "declared_type": prefix,
-                    "db_name": key,
-                    "horizontal_anchor": None,
-                    "vertical_anchor": None,
-                }
+        db_index = next(
+            (
+                index
+                for index in range(len(parts) - 1, 0, -1)
+                if index not in used_indexes and parts[index]
+            ),
+            None,
+        )
+        db_name = parts[db_index].lower().replace(" ", "_") if db_index else layer_name
         return {
-            "layer_name": name,
-            "declared_type": "tbc",
-            "db_name": name,
-            "horizontal_anchor": None,
-            "vertical_anchor": None,
+            "layer_name": layer_name,
+            "declared_type": map_type,
+            "db_name": db_name,
+            "horizontal_anchor": horizontal_anchor,
+            "vertical_anchor": vertical_anchor,
         }
 
     @staticmethod
