@@ -26,12 +26,9 @@ Plugin bazowy zajmuje się:
 
 import os
 import sys
+import json
 import traceback
 import importlib.util
-import tempfile
-import hashlib
-import urllib.request
-import urllib.parse
 
 import gi
 
@@ -56,11 +53,105 @@ from gi.repository import Gio
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gegl
 
+from pobieranie import czy_url, pobierz_lub_z_cache
+
 # ---------------------------------------------------------------------------
 # Stałe domyślne (mogą być nadpisane w podklasie)
 # ---------------------------------------------------------------------------
 DPI = 300
 MM_TO_PX = DPI / 25.4
+
+
+def normalizuj_szablon(data: dict | None) -> dict:
+    """Zwraca ustandaryzowany szablon kompatybilny zarówno z nowym, jak i starym JSON."""
+    if not isinstance(data, dict):
+        return {"version": 2, "template_id": "legacy", "layers": [], "warstwy": []}
+
+    legacy_layers = data.get("warstwy") or data.get("layers") or []
+    if not isinstance(legacy_layers, list):
+        legacy_layers = []
+
+    out_layers = []
+    for idx, warstwa in enumerate(legacy_layers, start=1):
+        if not isinstance(warstwa, dict):
+            continue
+        layer_id = str(warstwa.get("id") or warstwa.get("nazwa") or f"layer_{idx}")
+        kind = (
+            warstwa.get("kind")
+            or warstwa.get("typ")
+            or (
+                "text"
+                if warstwa.get("tekst") is not None or warstwa.get("typ") == "tekst"
+                else "image"
+            )
+        )
+        if kind == "tekst":
+            kind = "text"
+        if kind == "warstwa":
+            kind = "image"
+        if kind == "grupa":
+            kind = "group"
+
+        style = {
+            "font_family": warstwa.get("czcionka") or warstwa.get("font_family"),
+            "font_size_px": warstwa.get("rozmiar_px") or warstwa.get("font_size_px"),
+            "color_hex": warstwa.get("kolor_hex") or warstwa.get("color_hex"),
+            "alignment": warstwa.get("wyrownanie") or warstwa.get("alignment"),
+            "line_spacing": warstwa.get("odstep_liniowy")
+            or warstwa.get("line_spacing"),
+            "letter_spacing": warstwa.get("odstep_liter")
+            or warstwa.get("letter_spacing"),
+        }
+        style = {k: v for k, v in style.items() if v is not None}
+
+        layer = {
+            "id": layer_id,
+            "name": warstwa.get("nazwa") or layer_id,
+            "nazwa": warstwa.get("nazwa") or layer_id,
+            "role": warstwa.get("role") or warstwa.get("nazwa") or layer_id,
+            "kind": kind,
+            "type": kind,
+            "order": int(warstwa.get("order") or warstwa.get("z_index") or idx),
+            "visible": bool(warstwa.get("visible", True)),
+            "x": warstwa.get("x"),
+            "y": warstwa.get("y"),
+            "w": warstwa.get("w"),
+            "h": warstwa.get("h"),
+            "x_rel": warstwa.get("x_rel"),
+            "y_rel": warstwa.get("y_rel"),
+            "w_rel": warstwa.get("w_rel"),
+            "h_rel": warstwa.get("h_rel"),
+            "text": warstwa.get("tekst") or warstwa.get("text"),
+            "content_key": warstwa.get("content_key") or warstwa.get("nazwa"),
+            "style": style,
+        }
+        if "path" in warstwa:
+            layer["asset_path"] = warstwa.get("path")
+            layer["path"] = warstwa.get("path")
+        if "color_probka" in warstwa:
+            layer["color_probka"] = warstwa.get("color_probka")
+        if "tryb_mieszania" in warstwa:
+            layer["blend_mode"] = warstwa.get("tryb_mieszania")
+        out_layers.append(layer)
+
+    canvas = {
+        "width_px": data.get("szerokosc_px") or data.get("width_px"),
+        "height_px": data.get("wysokosc_px") or data.get("height_px"),
+        "width_mm": data.get("szerokosc_mm") or data.get("width_mm"),
+        "height_mm": data.get("wysokosc_mm") or data.get("height_mm"),
+        "dpi": data.get("rozdzielczosc_dpi") or data.get("dpi"),
+    }
+    canvas = {k: v for k, v in canvas.items() if v is not None}
+
+    out = {
+        "version": 2,
+        "template_id": data.get("template_id") or "template",
+        "name": data.get("name") or data.get("template_id") or "template",
+        "canvas": canvas,
+        "layers": out_layers,
+        "warstwy": out_layers,
+    }
+    return out
 
 
 def mm(val: float) -> int:
@@ -329,9 +420,9 @@ class GeneratorCore:
         """
         sciezka = dane.get(klucz, "").strip()
         if sciezka:
-            if self._czy_url(sciezka):
+            if czy_url(sciezka):
                 try:
-                    return self._pobierz_lub_z_cache(sciezka)
+                    return pobierz_lub_z_cache(sciezka)
                 except Exception:
                     return ""
             if os.path.isfile(sciezka):
@@ -346,28 +437,6 @@ class GeneratorCore:
             except Exception:
                 pass
         return ""
-
-    @staticmethod
-    def _czy_url(tekst: str) -> bool:
-        return tekst.lower().startswith(("http://", "https://"))
-
-    def _pobierz_lub_z_cache(self, url: str) -> str:
-        """Pobiera plik spod URL do wspólnego folderu tymczasowego (albo zwraca
-        już wcześniej pobraną kopię, jeśli istnieje)."""
-        katalog_cache = os.path.join(tempfile.gettempdir(), "gimp_karty_pobrane")
-        os.makedirs(katalog_cache, exist_ok=True)
-
-        nazwa_pliku = os.path.basename(urllib.parse.urlparse(url).path) or "plik"
-        skrot = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
-        docelowy = os.path.join(katalog_cache, f"{skrot}_{nazwa_pliku}")
-
-        if not os.path.isfile(docelowy):
-            with urllib.request.urlopen(url, timeout=15) as odpowiedz:
-                dane_pliku = odpowiedz.read()
-            with open(docelowy, "wb") as f:
-                f.write(dane_pliku)
-
-        return docelowy
 
     def tekst(
         self,
@@ -490,14 +559,17 @@ class GeneratorCore:
         return Gegl.Color.new(domyslna)
 
     def _zaladuj_szablon(self, json_path: str) -> dict:
-        """Ładuje JSON szablonu i indeksuje warstwy po nazwie."""
-        import json
-
+        """Ładuje JSON szablonu i indeksuje warstwy po nazwie oraz po ID."""
         if not os.path.isfile(json_path):
             return {}
         with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
-        return {w["nazwa"]: w for w in data.get("warstwy", [])}
+        template = normalizuj_szablon(data)
+        out = {}
+        for layer in template.get("layers", []):
+            out[layer.get("nazwa") or layer.get("id")] = layer
+            out[layer.get("id")] = layer
+        return out
 
     def tekst_z_szablonu(
         self,

@@ -46,6 +46,7 @@ if _WSPOLNE not in sys.path:
     sys.path.insert(0, _WSPOLNE)
 
 from db_reader import BazaSchema, czytaj_plik  # noqa: E402
+from pobieranie import pobierz_lub_z_cache  # noqa: E402
 
 
 class XcfTemplateSchema(BazaSchema):
@@ -363,10 +364,14 @@ class XcfTemplateGenerator(Gimp.PlugIn):
         return "", keys[0]
 
     def _replace_image(self, image, placeholder, source, old_geometry):
-        if not source or not os.path.isfile(source):
+        try:
+            local_source = pobierz_lub_z_cache(source)
+        except Exception:
+            return False
+        if not local_source:
             return False
         loaded = Gimp.file_load(
-            Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(source)
+            Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(local_source)
         )
         try:
             source_layer = loaded.get_layers()[0]
@@ -398,17 +403,17 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 continue
             if mapping["declared_type"] == "shape":
                 missing.append(
-                    f"{mapping['db_name']} (typ shape nie jest jeszcze obslugiwany)"
+                    f"{mapping['db_name']} (typ shape nie jest jeszcze obslugiwany)\n"
                 )
                 continue
             if mapping["declared_type"] == "text" and actual_type != "text":
                 missing.append(
-                    f"{mapping['db_name']} (template oczekuje text, warstwa ma {actual_type})"
+                    f"{mapping['db_name']} (template oczekuje text, warstwa ma {actual_type})\n"
                 )
                 continue
             if mapping["declared_type"] == "img" and actual_type == "text":
                 missing.append(
-                    f"{mapping['db_name']} (template oczekuje img, warstwa jest text)"
+                    f"{mapping['db_name']} (template oczekuje img, warstwa jest text)\n"
                 )
                 continue
             value, requested_key = self._value_for_layer(row, mapping, actual_type)
@@ -466,7 +471,7 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                         )
                     changed += 1
                 else:
-                    missing.append(f"{requested_key} (brak pliku: {value})")
+                    missing.append(f"{requested_key} (brak pliku: {value})\n")
         return changed, missing
 
     @staticmethod
@@ -721,7 +726,11 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 result.delete()
                 changed_total += changed
                 missing_total += len(missing)
+                debug_lines.append(f"missing={len(missing)}\n")
+                debug_lines.extend(missing)
+
             if logi_debug:
+                debug_lines.append(f"changed={changed_total}\n")
                 with open(debug_path, "w", encoding="utf-8") as debug_file:
                     debug_file.writelines(debug_lines)
             print(
