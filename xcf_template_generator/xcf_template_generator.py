@@ -222,6 +222,29 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 "layer_name": layer_name or name,
                 "declared_type": declared_type,
                 "db_name": db_name,
+                "horizontal_anchor": None,
+                "vertical_anchor": None,
+            }
+
+        if len(parts) >= 4:
+            layer_name, declared_type, db_name = parts[:3]
+            declared_type = declared_type.lower()
+            db_name = db_name.lower().replace(" ", "_")
+            options = {part.lower() for part in parts[3:]}
+            position = next(
+                (re.fullmatch(r"pos_([lcmr])([tmb])", option) for option in options),
+                None,
+            )
+            horizontal_anchor = position.group(1) if position else None
+            vertical_anchor = position.group(2) if position else None
+            if declared_type not in {"text", "img", "shape"} or not db_name:
+                return None
+            return {
+                "layer_name": layer_name or name,
+                "declared_type": declared_type,
+                "db_name": db_name,
+                "horizontal_anchor": horizontal_anchor,
+                "vertical_anchor": vertical_anchor,
             }
 
         # Kompatybilnosc z pierwsza wersja eksperymentu.
@@ -234,11 +257,15 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                     "layer_name": name,
                     "declared_type": prefix,
                     "db_name": key,
+                    "horizontal_anchor": None,
+                    "vertical_anchor": None,
                 }
         return {
             "layer_name": name,
             "declared_type": "tbc",
             "db_name": name,
+            "horizontal_anchor": None,
+            "vertical_anchor": None,
         }
 
     @staticmethod
@@ -266,16 +293,57 @@ class XcfTemplateGenerator(Gimp.PlugIn):
     def _is_dynamic_text_layer(cls, layer):
         return cls._text_box_mode_info(layer)[0]
 
+    @staticmethod
+    def _get_geometry(layer):
+        x, y = layer.get_offsets()[-2:]
+        return {
+            "x": x,
+            "y": y,
+            "width": layer.get_width(),
+            "height": layer.get_height(),
+        }
+
     @classmethod
-    def _center_dynamic_text(cls, layer, original_center_x, original_center_y):
+    def _set_layer_anchor(
+        cls,
+        layer,
+        old_geometry,
+        horizontal_anchor,
+        vertical_anchor,
+    ):
         try:
             Gimp.displays_flush()
         except Exception:
             pass
         new_width = layer.get_width()
         new_height = layer.get_height()
-        new_x = int(round(original_center_x - new_width / 2))
-        new_y = int(round(original_center_y - new_height / 2))
+        horizontal_anchor = horizontal_anchor or "l"
+        vertical_anchor = vertical_anchor or "t"
+        old_horizontal = {
+            "l": old_geometry["x"],
+            "c": old_geometry["x"] + old_geometry["width"] / 2,
+            "m": old_geometry["x"] + old_geometry["width"] / 2,
+            "r": old_geometry["x"] + old_geometry["width"],
+        }[horizontal_anchor]
+        old_vertical = {
+            "t": old_geometry["y"],
+            "m": old_geometry["y"] + old_geometry["height"] / 2,
+            "b": old_geometry["y"] + old_geometry["height"],
+        }[vertical_anchor]
+        new_x = int(
+            round(
+                old_horizontal
+                - {"l": 0, "c": new_width / 2, "m": new_width / 2, "r": new_width}[
+                    horizontal_anchor
+                ]
+            )
+        )
+        new_y = int(
+            round(
+                old_vertical
+                - {"t": 0, "m": new_height / 2, "b": new_height}[vertical_anchor]
+            )
+        )
         layer.set_offsets(new_x, new_y)
         return {
             "new_width": new_width,
@@ -306,7 +374,7 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 return str(value).strip(), key
         return "", keys[0]
 
-    def _replace_image(self, image, placeholder, source):
+    def _replace_image(self, image, placeholder, source, old_geometry):
         if not source or not os.path.isfile(source):
             return False
         loaded = Gimp.file_load(
@@ -316,10 +384,6 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             source_layer = loaded.get_layers()[0]
             layer = Gimp.Layer.new_from_drawable(source_layer, image)
             layer_name = placeholder.get_name()
-            offsets = placeholder.get_offsets()
-            x, y = offsets[-2:]
-            width = placeholder.get_width()
-            height = placeholder.get_height()
             parent = (
                 placeholder.get_parent() if hasattr(placeholder, "get_parent") else None
             )
@@ -327,10 +391,10 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             image.remove_layer(placeholder)
             image.insert_layer(layer, parent, position)
             layer.set_name(layer_name)
-            if width > 0 and height > 0:
-                layer.scale(width, height, False)
-            layer.set_offsets(x, y)
-            return True
+            if old_geometry["width"] > 0 and old_geometry["height"] > 0:
+                layer.scale(old_geometry["width"], old_geometry["height"], False)
+            layer.set_offsets(old_geometry["x"], old_geometry["y"])
+            return layer
         finally:
             loaded.delete()
 
@@ -365,22 +429,30 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 continue
             if actual_type == "text":
                 is_dynamic, mode_info = self._text_box_mode_info(layer)
-                original_x, original_y = layer.get_offsets()[-2:]
-                original_width = layer.get_width()
-                original_height = layer.get_height()
-                original_center_x = original_x + original_width / 2
-                original_center_y = original_y + original_height / 2
+                old_geometry = self._get_geometry(layer)
                 layer.set_text(value)
+                horizontal_anchor = mapping["horizontal_anchor"]
+                vertical_anchor = mapping["vertical_anchor"]
+                if is_dynamic and horizontal_anchor is None:
+                    horizontal_anchor = "m"
+                if is_dynamic and vertical_anchor is None:
+                    vertical_anchor = "m"
                 debug_line = (
                     f"layer={layer.get_name()!r}; dynamic={is_dynamic}; "
                     f"mode={mode_info}; "
-                    f"old_offset=({original_x}, {original_y}); "
-                    f"old_size=({original_width}, {original_height}); "
-                    f"old_center=({original_center_x:.1f}, {original_center_y:.1f})"
+                    f"anchor=({horizontal_anchor or 'l'}, "
+                    f"{vertical_anchor or 't'}); "
+                    f"old_offset=({old_geometry['x']}, {old_geometry['y']}); "
+                    f"old_size=({old_geometry['width']}, {old_geometry['height']}); "
+                    f"old_center=({old_geometry['x'] + old_geometry['width'] / 2:.1f}, "
+                    f"{old_geometry['y'] + old_geometry['height'] / 2:.1f})"
                 )
-                if is_dynamic:
-                    geometry = self._center_dynamic_text(
-                        layer, original_center_x, original_center_y
+                if is_dynamic or horizontal_anchor or vertical_anchor:
+                    geometry = self._set_layer_anchor(
+                        layer,
+                        old_geometry,
+                        horizontal_anchor,
+                        vertical_anchor,
                     )
                     debug_line += (
                         f"; new_size=({geometry['new_width']}, "
@@ -391,10 +463,22 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 if debug_lines is not None:
                     debug_lines.append(debug_line)
                 changed += 1
-            elif self._replace_image(image, layer, value):
-                changed += 1
             else:
-                missing.append(f"{requested_key} (brak pliku: {value})")
+                old_geometry = self._get_geometry(layer)
+                replacement = self._replace_image(image, layer, value, old_geometry)
+                if replacement:
+                    horizontal_anchor = mapping["horizontal_anchor"]
+                    vertical_anchor = mapping["vertical_anchor"]
+                    if horizontal_anchor or vertical_anchor:
+                        self._set_layer_anchor(
+                            replacement,
+                            old_geometry,
+                            horizontal_anchor,
+                            vertical_anchor,
+                        )
+                    changed += 1
+                else:
+                    missing.append(f"{requested_key} (brak pliku: {value})")
         return changed, missing
 
     @staticmethod
@@ -618,7 +702,7 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             generuj_png = config.get_property("generuj_png")
             logi_debug = config.get_property("logi_debug")
             debug_path = os.path.join(output_dir, "xcf_template_generator_debug.txt")
-            debug_lines = ["XCF template generator debug\n"] if logi_debug else None
+            debug_lines = ["XCF template generator debug\n"] if logi_debug else []
             if not logi_debug and os.path.isfile(debug_path):
                 os.remove(debug_path)
             if not generuj_xcf and not generuj_png:
@@ -629,7 +713,7 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                     Gio.File.new_for_path(template_path),
                 )
                 self._remove_invisible_layers(result)
-                row_debug = [] if logi_debug else None
+                row_debug = []
                 changed, missing = self._render(result, row, row_debug)
                 if logi_debug:
                     debug_lines.append(f"row={number}\n")
