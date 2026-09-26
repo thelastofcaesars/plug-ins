@@ -2,6 +2,7 @@ Wymagania:
 Gimp 3.2+
 
 Python 3.10+
+Git
 
 
 Ogólne
