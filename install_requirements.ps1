@@ -73,26 +73,33 @@ function Znajdz-GimpPython {
         Write-Warning "Podana ścieżka -GimpPythonPath nie istnieje: $GimpPythonPath"
     }
 
-    $kandydaci = @(
-        "$env:ProgramFiles\GIMP 3\bin\python3.exe",
-        "${env:ProgramFiles(x86)}\GIMP 3\bin\python3.exe",
-        "$env:LocalAppData\Programs\GIMP 3\bin\python3.exe"
+    # W zależności od builda GIMP-a plik nazywa się python3.exe albo python.exe.
+    $nazwyExe = @("python3.exe", "python.exe")
+    $foldeyBin = @(
+        "$env:ProgramFiles\GIMP 3\bin",
+        "${env:ProgramFiles(x86)}\GIMP 3\bin",
+        "$env:LocalAppData\Programs\GIMP 3\bin"
     )
-    foreach ($sciezka in $kandydaci) {
-        if ($sciezka -and (Test-Path $sciezka)) {
-            return $sciezka
+    foreach ($folder in $foldeyBin) {
+        foreach ($nazwa in $nazwyExe) {
+            $sciezka = Join-Path $folder $nazwa
+            if (Test-Path $sciezka) {
+                return $sciezka
+            }
         }
     }
 
     # Ostatnia deska ratunku: przeszukaj foldery "GIMP*" na wszystkich dyskach lokalnych.
     $dyski = Get-PSDrive -PSProvider FileSystem | Where-Object { Test-Path $_.Root }
     foreach ($dysk in $dyski) {
-        $znaleziony = Get-ChildItem -Path $dysk.Root -Filter "GIMP*" -Directory -ErrorAction SilentlyContinue |
-        ForEach-Object { Join-Path $_.FullName "bin\python3.exe" } |
-        Where-Object { Test-Path $_ } |
-        Select-Object -First 1
-        if ($znaleziony) {
-            return $znaleziony
+        foreach ($nazwa in $nazwyExe) {
+            $znaleziony = Get-ChildItem -Path $dysk.Root -Filter "GIMP*" -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "bin\$nazwa" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+            if ($znaleziony) {
+                return $znaleziony
+            }
         }
     }
 
@@ -101,19 +108,20 @@ function Znajdz-GimpPython {
 
 function Wlacz-SitePackages {
     <#
-        GIMP 3 na Windows dodaje obok python3.exe plik "python3*._pth", ktory
-        domyslnie ma zakomentowana linie "import site". Bez niej katalog
-        site-packages nie jest w ogole dolaczany do sys.path, wiec nawet po
-        "pip install" biblioteki (np. openpyxl) i tak nie zaimportuja sie w
-        pluginach GIMP-a. Trzeba odkomentowac te linie raz - robimy to tutaj.
+        GIMP 3 na Windows dodaje obok python3.exe/python.exe plik
+        "python*._pth", ktory domyslnie ma zakomentowana linie "import site".
+        Bez niej katalog site-packages nie jest w ogole dolaczany do sys.path,
+        wiec nawet po "pip install" biblioteki (np. openpyxl) i tak nie
+        zaimportuja sie w pluginach GIMP-a. Trzeba odkomentowac te linie raz -
+        robimy to tutaj.
     #>
     param([string]$PythonExe)
 
     $katalogBin = Split-Path -Parent $PythonExe
-    $plikPth = Get-ChildItem -Path $katalogBin -Filter "python3*._pth" -ErrorAction SilentlyContinue |
+    $plikPth = Get-ChildItem -Path $katalogBin -Filter "python*._pth" -ErrorAction SilentlyContinue |
     Select-Object -First 1
     if (-not $plikPth) {
-        Write-Host "Nie znaleziono pliku python3._pth - pomijam ten krok."
+        Write-Host "Nie znaleziono pliku python._pth - pomijam ten krok."
         return
     }
 
