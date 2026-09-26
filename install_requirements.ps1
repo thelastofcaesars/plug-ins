@@ -142,6 +142,65 @@ function Wlacz-SitePackages {
     Write-Host "Odblokowano site-packages w $($plikPth.Name) (odkomentowano 'import site')."
 }
 
+function Wylacz-ExternallyManaged {
+    <#
+        Buildy Pythona oparte na MSYS2 (jak w GIMP-ie) czasem maja plik
+        "EXTERNALLY-MANAGED", ktory pip odczytuje jako zakaz instalacji poza
+        wirtualnym srodowiskiem (blad "externally-managed-environment").
+        Flaga --break-system-packages to obchodzi, ale dziala tylko w pip
+        >= 23.0.1 - starsze pip zwraca "no such option". Jedyne wyjscie w
+        takim wypadku to tymczasowe przemianowanie tego pliku.
+    #>
+    param([string]$PythonExe)
+
+    $prefiks = Split-Path -Parent (Split-Path -Parent $PythonExe)
+    $plikExternally = Get-ChildItem -Path $prefiks -Filter "EXTERNALLY-MANAGED" -Recurse -File -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+    if (-not $plikExternally) {
+        return
+    }
+
+    $nowaNazwa = "$($plikExternally.Name).bak"
+    if (Test-Path (Join-Path $plikExternally.DirectoryName $nowaNazwa)) {
+        return  # juz wczesniej wylaczone
+    }
+
+    Rename-Item -Path $plikExternally.FullName -NewName $nowaNazwa
+    Write-Host "Tymczasowo wylaczono $($plikExternally.Name) (zmieniono nazwe na $nowaNazwa), zeby odblokowac pip install."
+}
+
+function Wlacz-ExternallyManaged {
+    <#
+        Przywraca plik EXTERNALLY-MANAGED wylaczony wczesniej przez
+        Wylacz-ExternallyManaged (odwrotnosc tamtej operacji).
+    #>
+    param([string]$PythonExe)
+
+    $prefiks = Split-Path -Parent (Split-Path -Parent $PythonExe)
+    $plikBak = Get-ChildItem -Path $prefiks -Filter "EXTERNALLY-MANAGED.bak" -Recurse -File -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+    if (-not $plikBak) {
+        return
+    }
+
+    Rename-Item -Path $plikBak.FullName -NewName "EXTERNALLY-MANAGED"
+    Write-Host "Przywrocono plik EXTERNALLY-MANAGED."
+}
+
+function Aktualizuj-Pip {
+    <#
+        Aktualizuje samo pip przed instalacja wymagan - starsze pip częsciej
+        nie obsługuje --break-system-packages albo ma inne problemy z
+        rozwiazywaniem zaleznosci.
+    #>
+    param([string]$PythonExe)
+
+    & $PythonExe -m pip install --upgrade pip --break-system-packages
+    if ($LASTEXITCODE -ne 0) {
+        & $PythonExe -m pip install --upgrade pip
+    }
+}
+
 function Zainstaluj-Wymagania {
     <#
         Nowsze pip (PEP 668) odmawia instalacji do "externally managed"
@@ -189,11 +248,14 @@ if (-not $SkipGimp) {
     else {
         Write-Host "Znaleziono: $gimpPython"
         Wlacz-SitePackages -PythonExe $gimpPython
+        Wylacz-ExternallyManaged -PythonExe $gimpPython
         & $gimpPython -m ensurepip --upgrade
+        Aktualizuj-Pip -PythonExe $gimpPython
         $kodWyjscia = Zainstaluj-Wymagania -PythonExe $gimpPython -SciezkaRequirements (Join-Path $KatalogSkryptu "requirements-gimp.txt")
         if ($kodWyjscia -ne 0) {
             throw "Instalacja requirements-gimp.txt nie powiodła się (kod $kodWyjscia)."
         }
+        Wlacz-ExternallyManaged -PythonExe $gimpPython
     }
 }
 
