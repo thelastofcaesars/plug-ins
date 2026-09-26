@@ -9,9 +9,17 @@ Każdy plugin używa tego tak:
 
 Eksportuje:
     BaseGeneratorPlugin  – klasa bazowa pluginu (PDB + dialog)
-    GeneratorCore        – czysta logika generatora, bez Gimp.PlugIn (bezpieczna
-                           do bezpo\u015bredniego instancjonowania poza dzia\u0142aniem
-                           GIMP, np. w uberskrypcie)
+    GeneratorCore        – czysta logika generatora, bez Gimp.PlugIn
+                           (bezpieczna do instancjonowania poza GIMP-em,
+                           np. w uberskrypcie)
+    dodaj_plik_bazy      – rejestruje argument PDB "plik bazy danych" z
+                           obsługą .url (Google Sheets/Drive)
+    rozwiaz_plik_bazy    – zwraca lokalną ścieżkę do niego (pobiera URL,
+                           jeśli plik_baza wskazuje na .url)
+    ARGUMENTY            – ogólny rejestr wspólnych argumentów PDB
+                           (ArgumentyPDB.add_arg()/.rozwiaz(), zob.
+                           argumenty_pdb.py) - katalog_zapis, plik_baza,
+                           arkusz, wiersz_od, wiersz_do itd.
     mm(val)              – przelicznik mm -> px (300 DPI)
     db                   – moduł db_reader (czytaj_plik, BazaSchema, Schema*, ...)
     Gimp, GimpUi, GObject, Gegl, GLib, Gio  – moduły gi (zainicjowane raz)
@@ -47,15 +55,26 @@ def _load(mod_name: str, filename: str):
 # Załaduj raz przy imporcie loader.py
 _base = _load("base_plugin", "base_plugin.py")
 db = _load("db_reader", "db_reader.py")
+_argumenty_pdb = _load("argumenty_pdb", "argumenty_pdb.py")
 
 # Eksportuj wprost
 BaseGeneratorPlugin = _base.BaseGeneratorPlugin
 GeneratorCore = _base.GeneratorCore
 mm = _base.mm
+ARGUMENTY = _argumenty_pdb.ARGUMENTY
+dodaj_plik_bazy = lambda procedure, flags, **kw: ARGUMENTY.add_arg(
+    procedure, flags, "plik_baza", **kw
+)
+rozwiaz_plik_bazy = lambda config, cache=None, **kw: ARGUMENTY.rozwiaz(
+    config, "plik_baza", cache=cache
+)
 
 __all__ = [
     "BaseGeneratorPlugin",
     "GeneratorCore",
+    "ARGUMENTY",
+    "dodaj_plik_bazy",
+    "rozwiaz_plik_bazy",
     "mm",
     "db",
     "Gimp",

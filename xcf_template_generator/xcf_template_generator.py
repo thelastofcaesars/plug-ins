@@ -47,11 +47,8 @@ if _WSPOLNE not in sys.path:
     sys.path.insert(0, _WSPOLNE)
 
 from db_reader import BazaSchema, czytaj_plik  # noqa: E402
-from pobieranie import (  # noqa: E402
-    pobierz_lub_z_cache,
-    pobierz_baze_z_url,
-    wczytaj_url_z_pliku,
-)
+from pobieranie import pobierz_lub_z_cache  # noqa: E402
+from argumenty_pdb import ARGUMENTY  # noqa: E402
 
 
 class XcfTemplateSchema(BazaSchema):
@@ -83,60 +80,12 @@ class XcfTemplateGenerator(Gimp.PlugIn):
         procedure.add_menu_path(self.MENU_PATH)
 
         rw = GObject.ParamFlags.READWRITE
-        procedure.add_file_argument(
-            "plik_template",
-            "Template XCF:",
-            "Plik XCF z warstwami nazwanymi nazwa:typ:nazwa_db.",
-            Gimp.FileChooserAction.OPEN,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_file_argument(
-            "plik_baza",
-            "Plik danych:",
-            "CSV, TSV, XLSX albo plik .url wskazujacy arkusz (np. Google "
-            "Sheets) - w tym przypadku URL jest odczytywany automatycznie, "
-            "a link do Google Sheets zamieniany na eksport .xlsx.",
-            Gimp.FileChooserAction.OPEN,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_file_argument(
-            "katalog_zapis",
-            "Folder zapisu:",
-            "Folder na wynikowy XCF i PNG.",
-            Gimp.FileChooserAction.SELECT_FOLDER,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_string_argument(
-            "arkusz",
-            "Arkusz XLSX (wewnetrzne):",
-            "Nazwa arkusza jest wybierana w dialogu.",
-            "",
-            rw,
-        )
-        procedure.add_int_argument(
-            "wiersz_od",
-            "Przetwarzaj wiersze od:",
-            "Numer pierwszego wiersza danych; 0 oznacza pierwszy wiersz.",
-            0,
-            1000000,
-            0,
-            rw,
-        )
-        procedure.add_int_argument(
-            "wiersz_do",
-            "Przetwarzaj wiersze do:",
-            "Numer ostatniego wiersza danych; 0 oznacza ostatni wiersz.",
-            0,
-            1000000,
-            0,
-            rw,
-        )
+        ARGUMENTY.add_arg(procedure, "plik_template_xcf")
+        ARGUMENTY.add_arg(procedure, "plik_baza")
+        ARGUMENTY.add_arg(procedure, "katalog_zapis")
+        ARGUMENTY.add_arg(procedure, "arkusz")
+        ARGUMENTY.add_arg(procedure, "wiersz_od")
+        ARGUMENTY.add_arg(procedure, "wiersz_do")
         procedure.add_boolean_argument(
             "generuj_xcf",
             "Generuj XCF",
@@ -576,37 +525,10 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             "arkusze": None,
             "wiersze": None,
             "wiersze_klucz": None,
-            "url_ostatnia": None,
-            "url_sciezka": "",
-            "url_blad": "",
+            "zrodlo": None,
+            "wynik": "",
+            "blad": "",
         }
-
-        def rozwiaz_sciezke_bazy():
-            """Zwraca lokalna sciezke do bazy z "plik_baza". Jesli wybrany
-            plik ma rozszerzenie .url, URL jest z niego odczytywany i
-            pobierany (link do Google Sheets zamieniany na eksport .xlsx)."""
-            gfile = config.get_property("plik_baza")
-            sciezka = gfile.get_path() if gfile else ""
-            if not sciezka:
-                stan["url_ostatnia"] = None
-                stan["url_sciezka"] = ""
-                stan["url_blad"] = ""
-                return ""
-            if os.path.splitext(sciezka)[1].lower() != ".url":
-                stan["url_ostatnia"] = None
-                stan["url_sciezka"] = ""
-                stan["url_blad"] = ""
-                return sciezka
-            if stan["url_ostatnia"] != sciezka:
-                try:
-                    url = wczytaj_url_z_pliku(sciezka)
-                    stan["url_sciezka"] = pobierz_baze_z_url(url)
-                    stan["url_blad"] = ""
-                except Exception as error:
-                    stan["url_sciezka"] = ""
-                    stan["url_blad"] = str(error)
-                stan["url_ostatnia"] = sciezka
-            return stan["url_sciezka"]
 
         def po_zmianie_arkusza(combo):
             if stan["aktualizacja_combo"]:
@@ -657,11 +579,11 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 stan["odswiezanie"] = False
 
         def _odswiez_licznik_wierszy():
-            sciezka_bazy = rozwiaz_sciezke_bazy()
+            sciezka_bazy = ARGUMENTY.rozwiaz(config, "plik_baza", cache=stan)
             if not sciezka_bazy:
-                if stan["url_blad"]:
+                if stan["blad"]:
                     licznik_wierszy.set_text(
-                        f"Nie mozna pobrac danych spod URL: {stan['url_blad']}"
+                        f"Nie mozna pobrac danych spod URL: {stan['blad']}"
                     )
                 else:
                     licznik_wierszy.set_text("Baza: nie wybrano pliku.")
@@ -713,12 +635,8 @@ class XcfTemplateGenerator(Gimp.PlugIn):
         dialog.destroy()
 
         try:
-            template_path = self._path(config, "plik_template")
-            plik_baza_path = self._path(config, "plik_baza")
-            if os.path.splitext(plik_baza_path)[1].lower() == ".url":
-                data_path = pobierz_baze_z_url(wczytaj_url_z_pliku(plik_baza_path))
-            else:
-                data_path = plik_baza_path
+            template_path = self._path(config, "plik_template_xcf")
+            data_path = ARGUMENTY.rozwiaz(config, "plik_baza")
             output_dir = self._path(config, "katalog_zapis")
             sheet = config.get_property("arkusz") or ""
             if not template_path or not os.path.isfile(template_path):

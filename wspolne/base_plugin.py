@@ -54,6 +54,7 @@ gi.require_version("Gegl", "0.4")
 from gi.repository import Gegl
 
 from pobieranie import czy_url, pobierz_lub_z_cache
+from argumenty_pdb import ARGUMENTY
 
 # ---------------------------------------------------------------------------
 # Stałe domyślne (mogą być nadpisane w podklasie)
@@ -670,49 +671,11 @@ class BaseGeneratorPlugin(GeneratorCore, Gimp.PlugIn):
         rw = GObject.ParamFlags.READWRITE
 
         # Wspólne argumenty dla wszystkich pluginów
-        procedure.add_file_argument(
-            "katalog_zapis",
-            "Folder do zapisu:",
-            "Gdzie zapisać pliki wynikowe (PNG + XCF)",
-            Gimp.FileChooserAction.SELECT_FOLDER,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_file_argument(
-            "plik_baza",
-            "Plik bazy danych (opcjonalnie):",
-            "Excel (.xlsx) lub CSV. Jeśli wybrany – generuje wiele grafik wsadowo.",
-            Gimp.FileChooserAction.OPEN,
-            True,
-            None,
-            rw,
-        )
-        procedure.add_string_argument(
-            "arkusz",
-            "Arkusz Excel:",
-            "Nazwa arkusza do odczytu. Wymagana, jeśli plik ma więcej niż 1 arkusz.",
-            "",
-            rw,
-        )
-        procedure.add_int_argument(
-            "wiersz_od",
-            "Przetwarzaj wiersze od:",
-            "Numer pierwszego wiersza danych w bazie; 0 oznacza pierwszy wiersz.",
-            0,
-            1_000_000,
-            0,
-            rw,
-        )
-        procedure.add_int_argument(
-            "wiersz_do",
-            "Przetwarzaj wiersze do:",
-            "Numer ostatniego wiersza danych w bazie; 0 oznacza ostatni wiersz.",
-            0,
-            1_000_000,
-            0,
-            rw,
-        )
+        ARGUMENTY.add_arg(procedure, "katalog_zapis")
+        ARGUMENTY.add_arg(procedure, "plik_baza")
+        ARGUMENTY.add_arg(procedure, "arkusz")
+        ARGUMENTY.add_arg(procedure, "wiersz_od")
+        ARGUMENTY.add_arg(procedure, "wiersz_do")
         procedure.add_boolean_argument(
             "generuj_przyklad",
             "Zapisz przykładowy CSV:",
@@ -830,10 +793,14 @@ class BaseGeneratorPlugin(GeneratorCore, Gimp.PlugIn):
             wybor_arkusza.show()
 
         def odswiez_licznik_wierszy(*_):
-            gfile = config.get_property("plik_baza")
-            sciezka_bazy = gfile.get_path() if gfile else None
+            sciezka_bazy = ARGUMENTY.rozwiaz(config, "plik_baza", cache=_stan)
             if not sciezka_bazy:
-                licznik_wierszy.set_text("Baza: nie wybrano pliku.")
+                if _stan.get("blad"):
+                    licznik_wierszy.set_text(
+                        f"Nie można pobrać danych spod URL: {_stan['blad']}"
+                    )
+                else:
+                    licznik_wierszy.set_text("Baza: nie wybrano pliku.")
                 wybor_arkusza.hide()
                 return
             odswiez_wybor_arkusza(sciezka_bazy)
@@ -891,9 +858,9 @@ class BaseGeneratorPlugin(GeneratorCore, Gimp.PlugIn):
             if config.get_property("zapisz_do_bazy"):
                 dane = self.dane_z_config(config)
                 # Plik docelowy: plik_baza jeśli wybrany, else baza_PROCEDURE_NAME.csv w katalogu
-                gfile_baza = config.get_property("plik_baza")
-                if gfile_baza:
-                    sciezka_bazy = gfile_baza.get_path()
+                sciezka_bazy_zapis = ARGUMENTY.rozwiaz(config, "plik_baza")
+                if sciezka_bazy_zapis:
+                    sciezka_bazy = sciezka_bazy_zapis
                 else:
                     sciezka_bazy = os.path.join(
                         katalog, f"baza_{self.PROCEDURE_NAME}.csv"
@@ -913,7 +880,11 @@ class BaseGeneratorPlugin(GeneratorCore, Gimp.PlugIn):
 
             if gfile_baza:
                 # Tryb wsadowy – z pliku
-                sciezka_baza = gfile_baza.get_path()
+                sciezka_baza = ARGUMENTY.rozwiaz(config, "plik_baza")
+                if not sciezka_baza:
+                    raise ValueError(
+                        "Nie udało się odczytać wybranego pliku bazy danych."
+                    )
                 arkusz = config.get_property("arkusz")
                 wiersze, ostrzezenia = db.czytaj_plik(
                     sciezka_baza, self.schema(), arkusz
