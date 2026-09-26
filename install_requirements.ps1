@@ -75,9 +75,8 @@ function Znajdz-GimpPython {
 
     $kandydaci = @(
         "$env:ProgramFiles\GIMP 3\bin\python3.exe",
-        "$env:ProgramFiles\GIMP 2\bin\python3.exe",
         "${env:ProgramFiles(x86)}\GIMP 3\bin\python3.exe",
-        "${env:ProgramFiles(x86)}\GIMP 2\bin\python3.exe"
+        "$env:LocalAppData\Programs\GIMP 3\bin\python3.exe"
     )
     foreach ($sciezka in $kandydaci) {
         if ($sciezka -and (Test-Path $sciezka)) {
