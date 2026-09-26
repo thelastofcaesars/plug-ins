@@ -158,6 +158,14 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             False,
             rw,
         )
+        procedure.add_boolean_argument(
+            "otworz_w_gimpie",
+            "Otworz wynik w GIMPie",
+            "Domyslnie wylaczone. Jesli wlaczone, kazdy wygenerowany plik "
+            "XCF zostanie od razu otwarty jako nowy obraz w GIMPie.",
+            False,
+            rw,
+        )
         return procedure
 
     @staticmethod
@@ -739,6 +747,7 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             generuj_xcf = config.get_property("generuj_xcf")
             generuj_png = config.get_property("generuj_png")
             logi_debug = config.get_property("logi_debug")
+            otworz_w_gimpie = config.get_property("otworz_w_gimpie")
             debug_path = os.path.join(output_dir, "xcf_template_generator_debug.txt")
             debug_lines = ["XCF template generator debug\n"] if logi_debug else []
             if not logi_debug and os.path.isfile(debug_path):
@@ -768,11 +777,17 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 if generuj_png and not self._save_png(result, png_path):
                     result.delete()
                     raise RuntimeError("Nie znaleziono procedury zapisu PNG.")
-                result.delete()
+                if otworz_w_gimpie:
+                    Gimp.Display.new(result)
+                else:
+                    result.delete()
                 changed_total += changed
                 missing_total += len(missing)
                 debug_lines.append(f"missing={len(missing)}\n")
                 debug_lines.extend(missing)
+
+            if otworz_w_gimpie:
+                Gimp.displays_flush()
 
             if logi_debug:
                 debug_lines.append(f"changed={changed_total}\n")
