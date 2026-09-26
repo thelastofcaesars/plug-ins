@@ -142,6 +142,26 @@ function Wlacz-SitePackages {
     Write-Host "Odblokowano site-packages w $($plikPth.Name) (odkomentowano 'import site')."
 }
 
+function Zainstaluj-Wymagania {
+    <#
+        Nowsze pip (PEP 668) odmawia instalacji do "externally managed"
+        środowiska (typowe dla Pythona GIMP-a/systemowego spoza virtualenv),
+        chyba że doda się --break-system-packages. Starsze pip tej flagi nie
+        zna, więc w razie błędu próbujemy jeszcze raz bez niej.
+    #>
+    param(
+        [string]$PythonExe,
+        [string]$SciezkaRequirements
+    )
+
+    & $PythonExe -m pip install --break-system-packages -r $SciezkaRequirements
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Instalacja z --break-system-packages nie powiodla sie - probuje bez tej flagi (starsze pip)."
+        & $PythonExe -m pip install -r $SciezkaRequirements
+    }
+    return $LASTEXITCODE
+}
+
 if (-not $SkipSystem) {
     Write-Host "== Instalacja requirements.txt (Python systemowy) ==" -ForegroundColor Cyan
     $pythonSystemowy = Get-Command python -ErrorAction SilentlyContinue
@@ -149,9 +169,9 @@ if (-not $SkipSystem) {
         Write-Warning "Nie znaleziono 'python' w PATH - pomijam instalację systemową."
     }
     else {
-        & python -m pip install -r (Join-Path $KatalogSkryptu "requirements.txt")
-        if ($LASTEXITCODE -ne 0) {
-            throw "Instalacja requirements.txt nie powiodła się (kod $LASTEXITCODE)."
+        $kodWyjscia = Zainstaluj-Wymagania -PythonExe "python" -SciezkaRequirements (Join-Path $KatalogSkryptu "requirements.txt")
+        if ($kodWyjscia -ne 0) {
+            throw "Instalacja requirements.txt nie powiodła się (kod $kodWyjscia)."
         }
     }
     Write-Host ""
@@ -170,9 +190,9 @@ if (-not $SkipGimp) {
         Write-Host "Znaleziono: $gimpPython"
         Wlacz-SitePackages -PythonExe $gimpPython
         & $gimpPython -m ensurepip --upgrade
-        & $gimpPython -m pip install -r (Join-Path $KatalogSkryptu "requirements-gimp.txt")
-        if ($LASTEXITCODE -ne 0) {
-            throw "Instalacja requirements-gimp.txt nie powiodła się (kod $LASTEXITCODE)."
+        $kodWyjscia = Zainstaluj-Wymagania -PythonExe $gimpPython -SciezkaRequirements (Join-Path $KatalogSkryptu "requirements-gimp.txt")
+        if ($kodWyjscia -ne 0) {
+            throw "Instalacja requirements-gimp.txt nie powiodła się (kod $kodWyjscia)."
         }
     }
 }
