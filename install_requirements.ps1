@@ -189,35 +189,49 @@ function Wlacz-ExternallyManaged {
 
 function Aktualizuj-Pip {
     <#
-        Aktualizuje samo pip przed instalacja wymagan - starsze pip częsciej
-        nie obsługuje --break-system-packages albo ma inne problemy z
-        rozwiazywaniem zaleznosci.
+        Aktualizuje samo pip przed instalacja wymagan - starsze pip czesciej
+        nie obsluguje --break-system-packages albo ma inne problemy z
+        rozwiazywaniem zaleznosci. Flage --break-system-packages uzywamy
+        tylko dla Pythona GIMP-a (UzyjBreakSystemPackages) - systemowego
+        Pythona nie chcemy w ten sposob "lamac".
     #>
-    param([string]$PythonExe)
+    param(
+        [string]$PythonExe,
+        [switch]$UzyjBreakSystemPackages
+    )
 
-    & $PythonExe -m pip install --upgrade pip --break-system-packages
-    if ($LASTEXITCODE -ne 0) {
-        & $PythonExe -m pip install --upgrade pip
+    if ($UzyjBreakSystemPackages) {
+        & $PythonExe -m pip install --upgrade pip --break-system-packages | Out-Host
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
     }
+    & $PythonExe -m pip install --upgrade pip | Out-Host
 }
 
 function Zainstaluj-Wymagania {
     <#
         Nowsze pip (PEP 668) odmawia instalacji do "externally managed"
-        środowiska (typowe dla Pythona GIMP-a/systemowego spoza virtualenv),
-        chyba że doda się --break-system-packages. Starsze pip tej flagi nie
-        zna, więc w razie błędu próbujemy jeszcze raz bez niej.
+        srodowiska (typowe dla Pythona GIMP-a spoza virtualenv), chyba ze
+        doda sie --break-system-packages. Uzywamy tej flagi tylko gdy jawnie
+        poproszono o to (-UzyjBreakSystemPackages) - dla systemowego Pythona
+        jej nie dodajemy. Starsze pip flagi nie zna, wiec w razie bledu
+        probujemy jeszcze raz bez niej.
     #>
     param(
         [string]$PythonExe,
-        [string]$SciezkaRequirements
+        [string]$SciezkaRequirements,
+        [switch]$UzyjBreakSystemPackages
     )
 
-    & $PythonExe -m pip install -r $SciezkaRequirements
-    if ($LASTEXITCODE -ne 0) {
+    if ($UzyjBreakSystemPackages) {
+        & $PythonExe -m pip install --break-system-packages -r $SciezkaRequirements | Out-Host
+        if ($LASTEXITCODE -eq 0) {
+            return 0
+        }
         Write-Warning "Instalacja z --break-system-packages nie powiodla sie - probuje bez tej flagi (starsze pip)."
-        & $PythonExe -m pip install -r $SciezkaRequirements
     }
+    & $PythonExe -m pip install -r $SciezkaRequirements | Out-Host
     return $LASTEXITCODE
 }
 
@@ -251,8 +265,8 @@ if (-not $SkipGimp) {
         Wlacz-SitePackages -PythonExe $gimpPython
         Wylacz-ExternallyManaged -PythonExe $gimpPython
         & $gimpPython -m ensurepip --upgrade
-        Aktualizuj-Pip -PythonExe $gimpPython
-        $kodWyjscia = Zainstaluj-Wymagania -PythonExe $gimpPython -SciezkaRequirements (Join-Path $KatalogSkryptu "requirements-gimp.txt")
+        Aktualizuj-Pip -PythonExe $gimpPython -UzyjBreakSystemPackages
+        $kodWyjscia = Zainstaluj-Wymagania -PythonExe $gimpPython -SciezkaRequirements (Join-Path $KatalogSkryptu "requirements-gimp.txt") -UzyjBreakSystemPackages
         if ($kodWyjscia -ne 0) {
             throw "Instalacja requirements-gimp.txt nie powiodła się (kod $kodWyjscia)."
         }
