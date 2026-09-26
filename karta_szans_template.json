@@ -1,0 +1,151 @@
+{
+  "version": 2,
+  "template_id": "karta_szans",
+  "name": "Karta Szans",
+  "canvas": {
+    "width_px": 1063,
+    "height_px": 591,
+    "width_mm": 90.0,
+    "height_mm": 50.04,
+    "dpi": 300
+  },
+  "layers": [
+    {
+      "id": "nr_karty",
+      "nazwa": "nr_karty",
+      "role": "card_number",
+      "kind": "text",
+      "order": 1,
+      "visible": true,
+      "x_rel": 0.0,
+      "y_rel": 0.81726,
+      "w_rel": 1.0,
+      "h_rel": 0.07614,
+      "content_key": "nr_karty",
+      "style": {
+        "font_family": "Times New Roman Normalny",
+        "font_size_px": 36,
+        "color_hex": "#FFFFFF",
+        "alignment": "2"
+      }
+    },
+    {
+      "id": "opis_karty",
+      "nazwa": "opis_karty",
+      "role": "description",
+      "kind": "text",
+      "order": 2,
+      "visible": true,
+      "x_rel": 0.0,
+      "y_rel": 0.31472,
+      "w_rel": 1.0,
+      "h_rel": 0.36717,
+      "content_key": "opis_karty",
+      "style": {
+        "font_family": "Times New Roman Normalny",
+        "font_size_px": 48,
+        "color_hex": "#FFFFFF",
+        "alignment": "2"
+      },
+      "default_text": "Tu nic nie ma!\nTu nic nie ma!\nTu nic nie ma!\nTu nic nie ma!"
+    },
+    {
+      "id": "rbot_img",
+      "nazwa": "rbot_img",
+      "role": "right_bottom_image",
+      "kind": "image",
+      "order": 3,
+      "visible": true,
+      "x_rel": 0.83067,
+      "y_rel": 0.67343,
+      "w_rel": 0.0555,
+      "h_rel": 0.10829,
+      "content_key": "rbot_img_path",
+      "path": ""
+    },
+    {
+      "id": "lbot_img",
+      "nazwa": "lbot_img",
+      "role": "left_bottom_image",
+      "kind": "image",
+      "order": 4,
+      "visible": true,
+      "x_rel": 0.11383,
+      "y_rel": 0.67005,
+      "w_rel": 0.0555,
+      "h_rel": 0.10829,
+      "content_key": "lbot_img_path",
+      "path": ""
+    },
+    {
+      "id": "img_mid",
+      "nazwa": "img_mid",
+      "role": "main_image",
+      "kind": "image",
+      "order": 5,
+      "visible": true,
+      "x_rel": 0.40452,
+      "y_rel": 0.08968,
+      "w_rel": 0.19191,
+      "h_rel": 0.21827,
+      "content_key": "img_mid_path",
+      "path": ""
+    },
+    {
+      "id": "ramka_color",
+      "nazwa": "ramka_color",
+      "role": "frame_color",
+      "kind": "image",
+      "order": 6,
+      "visible": true,
+      "x_rel": 0.02258,
+      "y_rel": 0.04061,
+      "w_rel": 0.95484,
+      "h_rel": 0.91878,
+      "content_key": "ramka_color_path",
+      "path": ""
+    },
+    {
+      "id": "ramka",
+      "nazwa": "ramka",
+      "role": "frame",
+      "kind": "image",
+      "order": 7,
+      "visible": true,
+      "x_rel": 0.0,
+      "y_rel": 0.0,
+      "w_rel": 1.0,
+      "h_rel": 1.0,
+      "content_key": "ramka_path",
+      "path": ""
+    },
+    {
+      "id": "img_mid_mid",
+      "nazwa": "img_mid_mid",
+      "role": "center_image",
+      "kind": "image",
+      "order": 8,
+      "visible": true,
+      "x_rel": 0.41863,
+      "y_rel": 0.3401,
+      "w_rel": 0.16463,
+      "h_rel": 0.3181,
+      "content_key": "img_mid_mid_path",
+      "path": ""
+    },
+    {
+      "id": "bg",
+      "nazwa": "bg",
+      "role": "background",
+      "kind": "image",
+      "order": 9,
+      "visible": true,
+      "x_rel": 0.03669,
+      "y_rel": 0.07107,
+      "w_rel": 0.92662,
+      "h_rel": 0.85787,
+      "content_key": "bg_path",
+      "path": ""
+    }
+  ]
+}

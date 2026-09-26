@@ -97,6 +97,27 @@ def _eksportuj_warstwe_png(warstwa, katalog_png: str) -> str:
     return os.path.join(katalog_png, nazwa_pliku)
 
 
+def _role_dla_warstwy(nazwa: str, typ: str) -> str:
+    """Ujednolicona semantyczna nazwa warstwy do użycia w JSON szablonie."""
+    base = (nazwa or "layer").strip().lower().replace(" ", "_")
+    if typ == "tekst":
+        return base if base else "text"
+    if typ == "grupa":
+        return base if base else "group"
+    return base if base else "image"
+
+
+def _layer_content_key(nazwa: str, typ: str) -> str:
+    """Generuje stabilny klucz pola danych do mapowania na CSV/XLSX."""
+    key = re.sub(r"[^a-zA-Z0-9_]+", "_", (nazwa or "layer").strip()).strip("_")
+    key = re.sub(r"_+", "_", key).lower()
+    if not key:
+        key = "layer"
+    if typ in ("tekst", "text"):
+        return key
+    return f"{key}_path"
+
+
 def _tekst_warstwy(warstwa) -> str:
     """Pobiera tekst z warstwy tekstowej – przez markup (get_text zwraca None w GIMP 3.2)."""
     # get_markup() zwraca Pango markup – wyciągamy czysty tekst regexem
@@ -118,7 +139,9 @@ def _tekst_warstwy(warstwa) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
+def _analizuj_warstwe(
+    warstwa, W: int, H: int, katalog_png: str = "", order: int = 0
+) -> dict:
     x, y = _offset(warstwa)
     w = warstwa.get_width()
     h = warstwa.get_height()
@@ -131,10 +154,10 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
         "w": w,
         "h": h,
         # pozycja jako ułamek obrazu (do łatwego przeniesienia na inny rozmiar)
-        "x_rel": round(x / W, 5),
-        "y_rel": round(y / H, 5),
-        "w_rel": round(w / W, 5),
-        "h_rel": round(h / H, 5),
+        "x_rel": round(x / W, 5) if W else 0.0,
+        "y_rel": round(y / H, 5) if H else 0.0,
+        "w_rel": round(w / W, 5) if W else 0.0,
+        "h_rel": round(h / H, 5) if H else 0.0,
         # wymiary w mm (przy 300 DPI)
         "x_mm": _mm_z_px(x),
         "y_mm": _mm_z_px(y),
@@ -143,13 +166,15 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
     }
 
     # --- Typ ---
-    is_group = hasattr(warstwa, "get_children") and warstwa.get_children()
+    is_group = hasattr(warstwa, "get_children") and bool(warstwa.get_children())
 
     if is_group:
         info["typ"] = "grupa"
         dzieci = []
-        for dziecko in warstwa.get_children():
-            dzieci.append(_analizuj_warstwe(dziecko, W, H, katalog_png))
+        for dziecko_idx, dziecko in enumerate(warstwa.get_children(), start=1):
+            dzieci.append(
+                _analizuj_warstwe(dziecko, W, H, katalog_png, order=order + dziecko_idx)
+            )
         info["dzieci"] = dzieci
 
     elif warstwa.is_text_layer():
@@ -168,7 +193,6 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
         # rozmiar (w jednostkach natywnych GIMP + konwersja do px)
         try:
             size_data = warstwa.get_font_size()
-            # zwraca (rozmiar, Gimp.Unit) lub samo float
             if isinstance(size_data, (list, tuple)):
                 rozmiar_raw = size_data[0]
                 unit = size_data[1] if len(size_data) > 1 else None
@@ -176,7 +200,6 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
                 rozmiar_raw = float(size_data)
                 unit = None
 
-            # próba konwersji jednostek → px
             if unit is not None:
                 try:
                     unit_str = str(unit).split(".")[-1].lower()
@@ -187,7 +210,7 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
                     elif "mm" in unit_str:
                         rozmiar_px = rozmiar_raw * 300 / 25.4
                     else:
-                        rozmiar_px = rozmiar_raw  # nieznana jednostka – zostawiamy
+                        rozmiar_px = rozmiar_raw
                 except Exception:
                     rozmiar_px = rozmiar_raw
             else:
@@ -214,7 +237,6 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
         except Exception:
             info["wyrownanie"] = "LEFT"
 
-        # dodatkowe właściwości tekstu
         try:
             info["tekst_wieloliniowy"] = warstwa.get_text().count("\n") > 0
         except Exception:
@@ -232,29 +254,25 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
 
     else:
         info["typ"] = "warstwa"
-        # hint koloru ze środka
         kolor_probka = _probka_koloru(warstwa)
         if kolor_probka:
             info["kolor_probka"] = kolor_probka
 
-        # czy warstwa pokrywa cały obraz (= prawdopodobnie tło)
         if x == 0 and y == 0 and w == W and h == H:
             info["uwaga"] = "pokrywa cały obraz (tło?)"
 
-        # eksport warstwy do PNG
         info["path"] = ""
         if katalog_png:
             info["path"] = _eksportuj_warstwe_png(warstwa, katalog_png)
-    # tryb mieszania
+
     try:
         mode = warstwa.get_mode()
         mode_str = str(mode).split(".")[-1]
-        if mode_str != "LAYER_MODE_NORMAL_LEGACY" and mode_str != "NORMAL":
+        if mode_str not in {"LAYER_MODE_NORMAL_LEGACY", "NORMAL"}:
             info["tryb_mieszania"] = mode_str
     except Exception:
         pass
 
-    # krycie
     try:
         krycie = warstwa.get_opacity()
         if krycie < 100.0:
@@ -262,6 +280,32 @@ def _analizuj_warstwe(warstwa, W: int, H: int, katalog_png: str = "") -> dict:
     except Exception:
         pass
 
+    info["id"] = _slugify(warstwa.get_name())
+    info["kind"] = (
+        "text"
+        if info["typ"] == "tekst"
+        else "image" if info["typ"] == "warstwa" else "group"
+    )
+    info["type"] = info["kind"]
+    info["role"] = _role_dla_warstwy(warstwa.get_name(), info["kind"])
+    info["content_key"] = _layer_content_key(warstwa.get_name(), info["kind"])
+    info["order"] = order
+    info["visible"] = True
+    info["style"] = {}
+    if info["kind"] == "text":
+        info["style"] = {
+            "font_family": info.get("czcionka"),
+            "font_size_px": info.get("rozmiar_px"),
+            "color_hex": info.get("kolor_hex"),
+            "alignment": info.get("wyrownanie", "0"),
+            "line_spacing": info.get("odstep_liniowy"),
+            "letter_spacing": info.get("odstep_liter"),
+        }
+        info["style"] = {k: v for k, v in info["style"].items() if v is not None}
+        info["text"] = info.get("tekst")
+    else:
+        info["asset_path"] = info.get("path")
+        info["path"] = info.get("path")
     return info
 
 
@@ -269,13 +313,34 @@ def analizuj_obraz(obraz, katalog_png: str = "") -> dict:
     W = obraz.get_width()
     H = obraz.get_height()
 
-    # rozdzielczość
     try:
         xres, _ = obraz.get_resolution()
     except Exception:
         xres = 300
 
+    template_name = "template"
+    try:
+        img_file = obraz.get_file()
+        if img_file and img_file.get_path():
+            template_name = os.path.splitext(os.path.basename(img_file.get_path()))[0]
+    except Exception:
+        pass
+
+    legacy_layers = []
+    for idx, warstwa in enumerate(obraz.get_layers(), start=1):
+        legacy_layers.append(_analizuj_warstwe(warstwa, W, H, katalog_png, order=idx))
+
     wynik = {
+        "version": 2,
+        "template_id": template_name,
+        "name": template_name,
+        "canvas": {
+            "width_px": W,
+            "height_px": H,
+            "width_mm": _mm_z_px(W),
+            "height_mm": _mm_z_px(H),
+            "dpi": round(xres, 1),
+        },
         "szerokosc_px": W,
         "wysokosc_px": H,
         "szerokosc_mm": _mm_z_px(W),
@@ -285,12 +350,9 @@ def analizuj_obraz(obraz, katalog_png: str = "") -> dict:
             "x_rel/y_rel/w_rel/h_rel = ułamek wymiaru obrazu (0.0–1.0). "
             "Pozwala skalować szablon na inne rozmiary: x_px = round(x_rel * nowy_W)."
         ),
-        "warstwy": [],
+        "layers": legacy_layers,
+        "warstwy": legacy_layers,
     }
-
-    # Pobierz warstwy płasko (GIMP zwraca od góry do dołu)
-    for warstwa in obraz.get_layers():
-        wynik["warstwy"].append(_analizuj_warstwe(warstwa, W, H, katalog_png))
 
     return wynik
 

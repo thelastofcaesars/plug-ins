@@ -384,8 +384,8 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             image.remove_layer(placeholder)
             image.insert_layer(layer, parent, position)
             layer.set_name(layer_name)
-            if old_geometry["width"] > 0 and old_geometry["height"] > 0:
-                layer.scale(old_geometry["width"], old_geometry["height"], False)
+            # if old_geometry["width"] > 0 and old_geometry["height"] > 0:
+            #    layer.scale(old_geometry["width"], old_geometry["height"], False)
             layer.set_offsets(old_geometry["x"], old_geometry["y"])
             return layer
         finally:
