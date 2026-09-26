@@ -24,6 +24,17 @@
 
 .EXAMPLE
     .\install_requirements.ps1 -GimpPythonPath "A:\GIMP 3\bin\python3.exe"
+
+.EXAMPLE
+    # Jeśli polityka wykonywania (np. wymuszona przez GPO) i tak blokuje ten
+    # plik, uruchom go jawnie z Bypass:
+    powershell -ExecutionPolicy Bypass -File .\install_requirements.ps1
+
+.EXAMPLE
+    # Jeśli konsola PowerShell jest już otwarta (bez odpalania nowego procesu),
+    # ustaw Bypass tylko dla bieżącej sesji i uruchom skrypt normalnie:
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+    .\install_requirements.ps1
 #>
 
 param(
@@ -34,6 +45,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 $KatalogSkryptu = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Domyślna polityka wykonywania (Restricted/AllSigned) blokuje uruchamianie
+# .ps1. Ustawiamy Bypass tylko dla tego procesu (nie wymaga uprawnień admina
+# i nie zmienia ustawień systemowych na stałe).
+try {
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+}
+catch {
+    Write-Warning "Nie udało się ustawić polityki wykonywania dla tego procesu: $_"
+}
+
+# Plik pobrany z internetu bywa oznaczony jako zablokowany (Mark of the Web),
+# co też uniemożliwia jego uruchomienie.
+try {
+    Unblock-File -Path $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue
+}
+catch {
+    # ignorujemy - to tylko wygoda, nie krytyczny krok
+}
 
 function Znajdz-GimpPython {
     if ($GimpPythonPath) {
