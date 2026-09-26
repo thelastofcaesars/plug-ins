@@ -126,8 +126,15 @@ class XcfTemplateGenerator(Gimp.PlugIn):
 
     @staticmethod
     def _slug(value):
-        result = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(value or "")).strip("_")
-        return result or "wynik"
+        tekst = str(value or "")
+        # Litery ogonkowe (\uXXXX - odporne na psucie kodowania pliku) sa
+        # zachowywane, tylko reszta niedozwolonych znakow zamieniana na "_".
+        ogonkowe = (
+            "\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c"
+            "\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b"
+        )
+        result = re.sub(f"[^a-zA-Z0-9_\\-{ogonkowe}]+", "_", tekst).strip("_").upper()
+        return result or "WYNIK"
 
     @staticmethod
     def _layers(image):
