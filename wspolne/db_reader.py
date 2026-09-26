@@ -376,6 +376,16 @@ def lista_arkuszy(sciezka: str) -> list[str]:
     return nazwy
 
 
+def _komorka_na_tekst(v) -> str:
+    """Konwertuje wartość komórki openpyxl na tekst. Float bez części
+    ułamkowej (np. 14.0, bo Excel/openpyxl nie rozróżnia int/float) zapisuje
+    jako "14", a nie "14.0".
+    """
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
+
+
 def _czytaj_arkusz_surowo(ws) -> list[tuple[int, dict]]:
     """Czyta surowe wiersze arkusza (bez schematu). Zwraca [(numer_wiersza, wiersz), ...]."""
     wiersze: list[tuple[int, dict]] = []
@@ -391,7 +401,7 @@ def _czytaj_arkusz_surowo(ws) -> list[tuple[int, dict]]:
         if all(v is None for v in row):
             continue  # pomijamy puste wiersze
         wiersz = {
-            naglowki[j]: (str(v).strip() if v is not None else "")
+            naglowki[j]: (_komorka_na_tekst(v) if v is not None else "")
             for j, v in enumerate(row)
             if j < len(naglowki)
         }
