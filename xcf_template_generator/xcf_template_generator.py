@@ -696,6 +696,15 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                     result.delete()
                     raise RuntimeError("Nie znaleziono procedury zapisu PNG.")
                 if otworz_w_gimpie:
+                    if generuj_xcf:
+                        # result jest nadal powiazany z plikiem template - wczytaj
+                        # ponownie z zapisanego XCF, zeby okno/tytul odnosily sie
+                        # do rzeczywistego wygenerowanego pliku, a nie do template.
+                        result.delete()
+                        result = Gimp.file_load(
+                            Gimp.RunMode.NONINTERACTIVE,
+                            Gio.File.new_for_path(xcf_path),
+                        )
                     Gimp.Display.new(result)
                 else:
                     result.delete()
