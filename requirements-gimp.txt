@@ -1,0 +1,6 @@
+# Zależności instalowane do PYTHONA WBUDOWANEGO W GIMP-a (nie systemowego).
+# Potrzebne, bo pluginy (np. wspolne/db_reader.py) importują je bezpośrednio
+# w procesie GIMP-a. Instaluj przez install_requirements.ps1 albo ręcznie:
+#   "<ścieżka do GIMP>\bin\python3.exe" -m ensurepip --upgrade
+#   "<ścieżka do GIMP>\bin\python3.exe" -m pip install -r requirements-gimp.txt
+openpyxl>=3.1.5

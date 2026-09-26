@@ -4,6 +4,24 @@ Gimp 3.2+
 Python 3.10+
 Git
 
+Instalacja zależności:
+
+    .\install_requirements.ps1
+
+Instaluje `requirements.txt` (Python systemowy - pdf_do_csv.py, pil_bmp_na_png.py)
+oraz `requirements-gimp.txt` (Python wbudowany w GIMP-a - potrzebny pluginom
+takim jak wspolne/db_reader.py, które importują np. openpyxl bezpośrednio
+w procesie GIMP-a). Jeśli skrypt nie znajdzie automatycznie Pythona z GIMP-a,
+podaj ścieżkę ręcznie:
+
+    .\install_requirements.ps1 -GimpPythonPath "A:\GIMP 3\bin\python3.exe"
+
+Ręczna instalacja pojedynczej biblioteki do Pythona GIMP-a (gdy nie chcesz
+używać skryptu):
+
+    "<ścieżka do GIMP>\bin\python3.exe" -m ensurepip --upgrade
+    "<ścieżka do GIMP>\bin\python3.exe" -m pip install nazwa_biblioteki
+
 
 Ogólne
 
