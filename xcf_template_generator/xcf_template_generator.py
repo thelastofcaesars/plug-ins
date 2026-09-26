@@ -41,12 +41,17 @@ from gi.repository import Gio
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
 
-_WSPOLNE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wspolne")
+_WSPOLNE_ROOT = os.path.dirname(os.path.dirname(__file__))
+_WSPOLNE = os.path.join(_WSPOLNE_ROOT, "wspolne")
 if _WSPOLNE not in sys.path:
     sys.path.insert(0, _WSPOLNE)
 
 from db_reader import BazaSchema, czytaj_plik  # noqa: E402
-from pobieranie import pobierz_lub_z_cache  # noqa: E402
+from pobieranie import (  # noqa: E402
+    pobierz_lub_z_cache,
+    pobierz_baze_z_url,
+    wczytaj_url_z_pliku,
+)
 
 
 class XcfTemplateSchema(BazaSchema):
@@ -90,7 +95,9 @@ class XcfTemplateGenerator(Gimp.PlugIn):
         procedure.add_file_argument(
             "plik_baza",
             "Plik danych:",
-            "CSV, TSV lub XLSX z kolumnami uzywanymi przez warstwy.",
+            "CSV, TSV, XLSX albo plik .url wskazujacy arkusz (np. Google "
+            "Sheets) - w tym przypadku URL jest odczytywany automatycznie, "
+            "a link do Google Sheets zamieniany na eksport .xlsx.",
             Gimp.FileChooserAction.OPEN,
             True,
             None,
@@ -561,7 +568,37 @@ class XcfTemplateGenerator(Gimp.PlugIn):
             "arkusze": None,
             "wiersze": None,
             "wiersze_klucz": None,
+            "url_ostatnia": None,
+            "url_sciezka": "",
+            "url_blad": "",
         }
+
+        def rozwiaz_sciezke_bazy():
+            """Zwraca lokalna sciezke do bazy z "plik_baza". Jesli wybrany
+            plik ma rozszerzenie .url, URL jest z niego odczytywany i
+            pobierany (link do Google Sheets zamieniany na eksport .xlsx)."""
+            gfile = config.get_property("plik_baza")
+            sciezka = gfile.get_path() if gfile else ""
+            if not sciezka:
+                stan["url_ostatnia"] = None
+                stan["url_sciezka"] = ""
+                stan["url_blad"] = ""
+                return ""
+            if os.path.splitext(sciezka)[1].lower() != ".url":
+                stan["url_ostatnia"] = None
+                stan["url_sciezka"] = ""
+                stan["url_blad"] = ""
+                return sciezka
+            if stan["url_ostatnia"] != sciezka:
+                try:
+                    url = wczytaj_url_z_pliku(sciezka)
+                    stan["url_sciezka"] = pobierz_baze_z_url(url)
+                    stan["url_blad"] = ""
+                except Exception as error:
+                    stan["url_sciezka"] = ""
+                    stan["url_blad"] = str(error)
+                stan["url_ostatnia"] = sciezka
+            return stan["url_sciezka"]
 
         def po_zmianie_arkusza(combo):
             if stan["aktualizacja_combo"]:
@@ -612,10 +649,14 @@ class XcfTemplateGenerator(Gimp.PlugIn):
                 stan["odswiezanie"] = False
 
         def _odswiez_licznik_wierszy():
-            gfile = config.get_property("plik_baza")
-            sciezka_bazy = gfile.get_path() if gfile else None
+            sciezka_bazy = rozwiaz_sciezke_bazy()
             if not sciezka_bazy:
-                licznik_wierszy.set_text("Baza: nie wybrano pliku.")
+                if stan["url_blad"]:
+                    licznik_wierszy.set_text(
+                        f"Nie mozna pobrac danych spod URL: {stan['url_blad']}"
+                    )
+                else:
+                    licznik_wierszy.set_text("Baza: nie wybrano pliku.")
                 wybor_arkusza.hide()
                 stan["sciezka_bazy"] = ""
                 stan["arkusze"] = None
@@ -665,7 +706,11 @@ class XcfTemplateGenerator(Gimp.PlugIn):
 
         try:
             template_path = self._path(config, "plik_template")
-            data_path = self._path(config, "plik_baza")
+            plik_baza_path = self._path(config, "plik_baza")
+            if os.path.splitext(plik_baza_path)[1].lower() == ".url":
+                data_path = pobierz_baze_z_url(wczytaj_url_z_pliku(plik_baza_path))
+            else:
+                data_path = plik_baza_path
             output_dir = self._path(config, "katalog_zapis")
             sheet = config.get_property("arkusz") or ""
             if not template_path or not os.path.isfile(template_path):
