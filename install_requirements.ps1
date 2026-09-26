@@ -213,7 +213,7 @@ function Zainstaluj-Wymagania {
         [string]$SciezkaRequirements
     )
 
-    & $PythonExe -m pip install --break-system-packages -r $SciezkaRequirements
+    & $PythonExe -m pip install -r $SciezkaRequirements
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Instalacja z --break-system-packages nie powiodla sie - probuje bez tej flagi (starsze pip)."
         & $PythonExe -m pip install -r $SciezkaRequirements
@@ -228,6 +228,7 @@ if (-not $SkipSystem) {
         Write-Warning "Nie znaleziono 'python' w PATH - pomijam instalację systemową."
     }
     else {
+        Aktualizuj-Pip -PythonExe "python"
         $kodWyjscia = Zainstaluj-Wymagania -PythonExe "python" -SciezkaRequirements (Join-Path $KatalogSkryptu "requirements.txt")
         if ($kodWyjscia -ne 0) {
             throw "Instalacja requirements.txt nie powiodła się (kod $kodWyjscia)."

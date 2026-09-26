@@ -4,6 +4,11 @@ Gimp 3.2+
 Python 3.10+
 Git
 
+
+Pobranie najnowszych zmian w pliku:
+uruchom: Open Git Bash klikając prawym przyciskiem na folder plug-ins
+Wpisz git pull i wciśnij enter
+
 Instalacja zależności:
 
     .\install_requirements.ps1
@@ -22,9 +27,7 @@ używać skryptu):
     "<ścieżka do GIMP>\bin\python3.exe" -m ensurepip --upgrade
     "<ścieżka do GIMP>\bin\python3.exe" -m pip install nazwa_biblioteki
 
-
 Ogólne
-
 
 kolor królestwa - albo z kartą- wsm z kartą generowane - czyli z bazy danych kart wzięty kolor na podstawke
 generacja gralli 0p
